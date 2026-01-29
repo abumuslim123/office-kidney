@@ -40,6 +40,7 @@ export default function HrListView() {
   const [editingEntry, setEditingEntry] = useState<HrEntry | null>(null);
 
   const [search, setSearch] = useState('');
+  const [filters, setFilters] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -47,13 +48,22 @@ export default function HrListView() {
   const importFileRef = useRef<HTMLInputElement>(null);
   const [expandedCells, setExpandedCells] = useState<Set<string>>(new Set());
 
+  const getEntriesParams = () => {
+    const params: Record<string, string> = {};
+    if (search) params.search = search;
+    for (const [k, v] of Object.entries(filters)) {
+      if (v && v.trim()) params[`filter[${k}]`] = v.trim();
+    }
+    return params;
+  };
+
   const load = async () => {
     if (!listId) return;
     setLoading(true);
     try {
       const [listRes, entriesRes] = await Promise.all([
         api.get<HrList>(`/hr/lists/${listId}`),
-        api.get<HrEntry[]>(`/hr/lists/${listId}/entries`, { params: search ? { search } : {} }),
+        api.get<HrEntry[]>(`/hr/lists/${listId}/entries`, { params: getEntriesParams() }),
       ]);
       setList(listRes.data);
       setEntries(entriesRes.data);
@@ -66,12 +76,23 @@ export default function HrListView() {
     load();
   }, [listId]);
 
+  // Serialize filters to string for stable dependency comparison
+  const filtersKey = JSON.stringify(filters);
+
   useEffect(() => {
     if (listId) {
-      api.get<HrEntry[]>(`/hr/lists/${listId}/entries`, { params: search ? { search } : {} })
+      // Parse filters from serialized key to avoid stale closure
+      const currentFilters: Record<string, string> = JSON.parse(filtersKey);
+      const params: Record<string, string> = {};
+      if (search) params.search = search;
+      for (const [k, v] of Object.entries(currentFilters)) {
+        if (v && v.trim()) params[`filter[${k}]`] = v.trim();
+      }
+      console.log('[HrListView] fetching entries with params:', params);
+      api.get<HrEntry[]>(`/hr/lists/${listId}/entries`, { params })
         .then((res) => setEntries(res.data));
     }
-  }, [search, listId]);
+  }, [search, filtersKey, listId]);
 
   // ========== Fields ==========
 
@@ -224,9 +245,8 @@ export default function HrListView() {
     if (!listId) return;
     setExporting(true);
     try {
-      const params = search ? { search } : {};
       const res = await api.get(`/hr/lists/${listId}/export`, {
-        params,
+        params: getEntriesParams(),
         responseType: 'blob',
       });
       const url = window.URL.createObjectURL(new Blob([res.data]));
@@ -616,6 +636,41 @@ export default function HrListView() {
           className="w-full max-w-xs px-3 py-2 border border-gray-300 rounded text-sm"
         />
       </div>
+
+      {/* Filters by fields */}
+      {fields.length > 0 && (
+        <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-sm font-medium text-gray-700">Фильтры по полям</span>
+            {(Object.keys(filters).some((k) => filters[k]?.trim()) || search) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilters({});
+                  setSearch('');
+                }}
+                className="text-sm text-gray-600 hover:text-gray-800 underline"
+              >
+                Сбросить фильтры
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+            {fields.map((f) => (
+              <div key={f.id} className="flex flex-col gap-0.5">
+                <label className="text-xs text-gray-600">{f.name}</label>
+                <input
+                  type="text"
+                  value={filters[f.name] ?? ''}
+                  onChange={(e) => setFilters((prev) => ({ ...prev, [f.name]: e.target.value }))}
+                  placeholder={`Фильтр по ${f.name}`}
+                  className="w-full max-w-xs px-2 py-1.5 border border-gray-300 rounded text-sm"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Entries table */}
       {fields.length === 0 ? (

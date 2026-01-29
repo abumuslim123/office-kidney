@@ -113,6 +113,9 @@ export class HrController {
       const match = key.match(/^filter\[(.+)\]$/);
       if (match) filters[match[1]] = value;
     }
+    console.log('[HR] findEntries query:', JSON.stringify(query));
+    console.log('[HR] findEntries filters:', JSON.stringify(filters));
+    console.log('[HR] findEntries search:', search);
     return this.hr.findEntriesByList(listId, filters, search);
   }
 

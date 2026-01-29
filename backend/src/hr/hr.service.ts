@@ -186,13 +186,15 @@ export class HrService {
       .where('e.listId = :listId', { listId })
       .orderBy('e.createdAt', 'ASC');
 
-    // JSONB filters: filter[fieldName]=value
-    for (const [key, value] of Object.entries(filters)) {
-      qb.andWhere(`e.data->>:key${key} ILIKE :val${key}`, {
-        [`key${key}`]: key,
-        [`val${key}`]: `%${value}%`,
+    // JSONB filters: filter[fieldName]=value (indexed params to avoid special chars in param names)
+    Object.entries(filters).forEach(([key, value], i) => {
+      const keyParam = `filterKey${i}`;
+      const valParam = `filterVal${i}`;
+      qb.andWhere(`e.data->> :${keyParam} ILIKE :${valParam}`, {
+        [keyParam]: key,
+        [valParam]: `%${value}%`,
       });
-    }
+    });
 
     // Full-text search across all text fields
     if (search) {
