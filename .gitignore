@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build
+dist/
+build/
+.next/
+
+# Env and secrets
+.env
+.env.local
+.env.*.local
+.env.production
+
+# IDE and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# Docker
+.docker/
+
+# Misc
+*.tsbuildinfo
+coverage/

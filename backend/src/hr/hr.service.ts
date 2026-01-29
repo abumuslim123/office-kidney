@@ -1,0 +1,365 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, ILike } from 'typeorm';
+import * as ExcelJS from 'exceljs';
+import { HrList } from './entities/hr-list.entity';
+import { HrFieldDefinition } from './entities/hr-field-definition.entity';
+import { HrEntry } from './entities/hr-entry.entity';
+import { CreateListDto } from './dto/create-list.dto';
+import { UpdateListDto } from './dto/update-list.dto';
+import { CreateFieldDto } from './dto/create-field.dto';
+import { UpdateFieldDto } from './dto/update-field.dto';
+import { CreateEntryDto } from './dto/create-entry.dto';
+import { UpdateEntryDto } from './dto/update-entry.dto';
+
+@Injectable()
+export class HrService {
+  constructor(
+    @InjectRepository(HrList)
+    private listRepo: Repository<HrList>,
+    @InjectRepository(HrFieldDefinition)
+    private fieldRepo: Repository<HrFieldDefinition>,
+    @InjectRepository(HrEntry)
+    private entryRepo: Repository<HrEntry>,
+  ) {}
+
+  // ========== Lists ==========
+
+  async findAllLists(year?: number): Promise<HrList[]> {
+    const where = year ? { year } : {};
+    return this.listRepo.find({
+      where,
+      order: { year: 'DESC', name: 'ASC' },
+    });
+  }
+
+  async findListById(id: string): Promise<HrList> {
+    const list = await this.listRepo.findOne({
+      where: { id },
+      relations: ['fields'],
+    });
+    if (!list) throw new NotFoundException('List not found');
+    return list;
+  }
+
+  async createList(dto: CreateListDto): Promise<HrList> {
+    const list = this.listRepo.create({
+      name: dto.name,
+      year: dto.year ?? null,
+    });
+    return this.listRepo.save(list);
+  }
+
+  async updateList(id: string, dto: UpdateListDto): Promise<HrList> {
+    const list = await this.findListById(id);
+    if (dto.name !== undefined) list.name = dto.name;
+    if (dto.year !== undefined) list.year = dto.year;
+    return this.listRepo.save(list);
+  }
+
+  async deleteList(id: string): Promise<void> {
+    const list = await this.findListById(id);
+    await this.listRepo.remove(list);
+  }
+
+  async createListFromFile(
+    fileBuffer: Buffer,
+    name?: string,
+    year?: number,
+  ): Promise<HrList> {
+    const workbook = new ExcelJS.Workbook();
+    const arrayBuffer = new Uint8Array(fileBuffer).buffer as ArrayBuffer;
+    await workbook.xlsx.load(arrayBuffer);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) throw new NotFoundException('Файл не содержит листов');
+
+    const headerRow = sheet.getRow(1);
+    const headers: string[] = [];
+    headerRow.eachCell((cell) => {
+      const val = cell.value?.toString()?.trim();
+      if (val) headers.push(val);
+    });
+    if (headers.length === 0) throw new NotFoundException('Первая строка должна содержать заголовки колонок');
+
+    const listName = name || `Импорт ${new Date().toISOString().slice(0, 10)}`;
+    const list = await this.createList({ name: listName, year: year });
+
+    for (let i = 0; i < headers.length; i++) {
+      await this.createField(list.id, {
+        name: headers[i],
+        fieldType: 'text',
+        order: i,
+      });
+    }
+
+    const fields = await this.findFieldsByList(list.id);
+    const rowsToSave: Record<string, unknown>[] = [];
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+      const data: Record<string, unknown> = {};
+      let hasAny = false;
+      headers.forEach((header, colIndex) => {
+        const cell = row.getCell(colIndex + 1);
+        let val: unknown = cell.value;
+        if (val != null && val !== '') {
+          hasAny = true;
+          if (typeof val === 'object' && val !== null && 'result' in val) {
+            val = (val as { result: unknown }).result;
+          }
+          // Convert Date to dd.mm.yyyy format
+          if (val instanceof Date) {
+            const d = val.getDate().toString().padStart(2, '0');
+            const m = (val.getMonth() + 1).toString().padStart(2, '0');
+            const y = val.getFullYear();
+            val = `${d}.${m}.${y}`;
+          } else if (typeof val === 'object' && val !== null) {
+            val = String(val);
+          }
+          data[header] = val;
+        }
+      });
+      if (hasAny) rowsToSave.push(data);
+    });
+
+    for (const data of rowsToSave) {
+      const entry = this.entryRepo.create({ listId: list.id, data });
+      await this.entryRepo.save(entry);
+    }
+
+    return this.findListById(list.id);
+  }
+
+  // ========== Fields ==========
+
+  async findFieldsByList(listId: string): Promise<HrFieldDefinition[]> {
+    await this.findListById(listId); // ensure list exists
+    return this.fieldRepo.find({
+      where: { listId },
+      order: { order: 'ASC', name: 'ASC' },
+    });
+  }
+
+  async createField(listId: string, dto: CreateFieldDto): Promise<HrFieldDefinition> {
+    await this.findListById(listId);
+    const maxOrder = await this.fieldRepo
+      .createQueryBuilder('f')
+      .where('f.listId = :listId', { listId })
+      .select('MAX(f.order)', 'max')
+      .getRawOne();
+    const field = this.fieldRepo.create({
+      listId,
+      name: dto.name,
+      fieldType: dto.fieldType,
+      options: dto.options ?? null,
+      order: dto.order ?? (maxOrder?.max ?? -1) + 1,
+    });
+    return this.fieldRepo.save(field);
+  }
+
+  async updateField(fieldId: string, dto: UpdateFieldDto): Promise<HrFieldDefinition> {
+    const field = await this.fieldRepo.findOne({ where: { id: fieldId } });
+    if (!field) throw new NotFoundException('Field not found');
+    if (dto.name !== undefined) field.name = dto.name;
+    if (dto.fieldType !== undefined) field.fieldType = dto.fieldType;
+    if (dto.options !== undefined) field.options = dto.options;
+    if (dto.order !== undefined) field.order = dto.order;
+    return this.fieldRepo.save(field);
+  }
+
+  async deleteField(fieldId: string): Promise<void> {
+    const field = await this.fieldRepo.findOne({ where: { id: fieldId } });
+    if (!field) throw new NotFoundException('Field not found');
+    await this.fieldRepo.remove(field);
+  }
+
+  // ========== Entries ==========
+
+  async findEntriesByList(
+    listId: string,
+    filters: Record<string, string> = {},
+    search?: string,
+  ): Promise<HrEntry[]> {
+    await this.findListById(listId);
+
+    const qb = this.entryRepo
+      .createQueryBuilder('e')
+      .where('e.listId = :listId', { listId })
+      .orderBy('e.createdAt', 'ASC');
+
+    // JSONB filters: filter[fieldName]=value
+    for (const [key, value] of Object.entries(filters)) {
+      qb.andWhere(`e.data->>:key${key} ILIKE :val${key}`, {
+        [`key${key}`]: key,
+        [`val${key}`]: `%${value}%`,
+      });
+    }
+
+    // Full-text search across all text fields
+    if (search) {
+      qb.andWhere(`e.data::text ILIKE :search`, { search: `%${search}%` });
+    }
+
+    return qb.getMany();
+  }
+
+  async findEntryById(entryId: string): Promise<HrEntry> {
+    const entry = await this.entryRepo.findOne({ where: { id: entryId } });
+    if (!entry) throw new NotFoundException('Entry not found');
+    return entry;
+  }
+
+  async createEntry(listId: string, dto: CreateEntryDto): Promise<HrEntry> {
+    await this.findListById(listId);
+    const entry = this.entryRepo.create({
+      listId,
+      data: dto.data,
+    });
+    return this.entryRepo.save(entry);
+  }
+
+  async updateEntry(entryId: string, dto: UpdateEntryDto): Promise<HrEntry> {
+    const entry = await this.findEntryById(entryId);
+    if (dto.data !== undefined) entry.data = dto.data;
+    return this.entryRepo.save(entry);
+  }
+
+  async deleteEntry(entryId: string): Promise<void> {
+    const entry = await this.findEntryById(entryId);
+    await this.entryRepo.remove(entry);
+  }
+
+  async deleteAllEntries(listId: string): Promise<{ deleted: number }> {
+    await this.findListById(listId); // ensure list exists
+    const result = await this.entryRepo.delete({ listId });
+    return { deleted: result.affected ?? 0 };
+  }
+
+  // ========== Export ==========
+
+  async exportToExcel(
+    listId: string,
+    filters: Record<string, string> = {},
+    search?: string,
+  ): Promise<Buffer> {
+    const list = await this.findListById(listId);
+    const fields = await this.findFieldsByList(listId);
+    const entries = await this.findEntriesByList(listId, filters, search);
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet(list.name);
+
+    // Header row
+    sheet.columns = fields.map((f) => ({
+      header: f.name,
+      key: f.name,
+      width: 20,
+    }));
+
+    // Style header
+    sheet.getRow(1).font = { bold: true };
+    sheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE0E0E0' },
+    };
+
+    // Data rows
+    for (const entry of entries) {
+      const row: Record<string, unknown> = {};
+      for (const f of fields) {
+        row[f.name] = entry.data[f.name] ?? '';
+      }
+      sheet.addRow(row);
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    return Buffer.from(buffer);
+  }
+
+  async getListTemplate(listId: string): Promise<Buffer> {
+    const list = await this.findListById(listId);
+    const fields = await this.findFieldsByList(listId);
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet(list.name);
+
+    sheet.columns = fields.map((f) => ({
+      header: f.name,
+      key: f.name,
+      width: 20,
+    }));
+    sheet.getRow(1).font = { bold: true };
+    sheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE0E0E0' },
+    };
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    return Buffer.from(buffer);
+  }
+
+  async importEntriesFromFile(
+    listId: string,
+    fileBuffer: Buffer,
+  ): Promise<{ imported: number; errors: string[] }> {
+    await this.findListById(listId);
+    const errors: string[] = [];
+    let imported = 0;
+
+    const workbook = new ExcelJS.Workbook();
+    const arrayBuffer = new Uint8Array(fileBuffer).buffer as ArrayBuffer;
+    await workbook.xlsx.load(arrayBuffer);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) {
+      return { imported: 0, errors: ['Файл не содержит листов'] };
+    }
+
+    const headerRow = sheet.getRow(1);
+    const headers: string[] = [];
+    headerRow.eachCell((cell) => {
+      const val = cell.value?.toString()?.trim();
+      if (val) headers.push(val);
+    });
+
+    const rowsToSave: { rowNumber: number; data: Record<string, unknown> }[] = [];
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+      const data: Record<string, unknown> = {};
+      let hasAny = false;
+      headers.forEach((header, colIndex) => {
+        const cell = row.getCell(colIndex + 1);
+        let val: unknown = cell.value;
+        if (val != null && val !== '') {
+          hasAny = true;
+          if (typeof val === 'object' && val !== null && 'result' in val) {
+            val = (val as { result: unknown }).result;
+          }
+          // Convert Date to dd.mm.yyyy format
+          if (val instanceof Date) {
+            const d = val.getDate().toString().padStart(2, '0');
+            const m = (val.getMonth() + 1).toString().padStart(2, '0');
+            const y = val.getFullYear();
+            val = `${d}.${m}.${y}`;
+          } else if (typeof val === 'object' && val !== null) {
+            val = String(val);
+          }
+          data[header] = val;
+        }
+      });
+      if (hasAny) rowsToSave.push({ rowNumber, data });
+    });
+
+    for (const { rowNumber, data } of rowsToSave) {
+      try {
+        const entry = this.entryRepo.create({ listId, data });
+        await this.entryRepo.save(entry);
+        imported++;
+      } catch (err) {
+        errors.push(`Строка ${rowNumber}: ${err instanceof Error ? err.message : 'Ошибка сохранения'}`);
+      }
+    }
+
+    return { imported, errors };
+  }
+}

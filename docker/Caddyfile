@@ -1,0 +1,12 @@
+# Kidney Office — reverse proxy with automatic Let's Encrypt
+# DOMAIN set in docker-compose. :80 — чтобы сервер всегда отвечал (в т.ч. для Cloudflare).
+
+# Сначала слушаем порт 80 для любого хоста (устраняет 521, если Cloudflare стучится по HTTP)
+:80 {
+    reverse_proxy frontend:80
+}
+
+# HTTPS для домена (Let's Encrypt). Если домен за Cloudflare proxy — включите SSL Flexible.
+{$DOMAIN:localhost} {
+    reverse_proxy frontend:80
+}

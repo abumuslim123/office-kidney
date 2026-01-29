@@ -1,0 +1,30 @@
+# Systemd unit: автозапуск Kidney Office при загрузке сервера
+#
+# Установка:
+#   1. Скопировать в systemd: sudo cp docker/kidney-office.service /etc/systemd/system/
+#   2. Отредактировать пути: sudo nano /etc/systemd/system/kidney-office.service
+#      Заменить /opt/kidney-office на фактический путь к проекту (например /home/user/kidney-office)
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable kidney-office
+#   5. sudo systemctl start kidney-office
+#
+# Команды: status, start, stop, restart, logs (journalctl -u kidney-office -f)
+# Используются scripts/docker-compose-up.sh и docker-compose-down.sh — подойдут и docker-compose, и docker compose.
+
+[Unit]
+Description=Kidney Office (frontend, backend, postgres, caddy)
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/kidney/kidney-office
+ExecStart=/home/kidney/kidney-office/scripts/docker-compose-up.sh up -d
+ExecStop=/home/kidney/kidney-office/scripts/docker-compose-down.sh
+TimeoutStartSec=300
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
