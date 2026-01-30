@@ -107,11 +107,12 @@ export class HrController {
     @Query('search') search?: string,
     @Query() query?: Record<string, string>,
   ) {
-    // Extract filter[fieldName]=value from query
+    // Extract f_fieldName=value from query (f_ prefix for field filters)
     const filters: Record<string, string> = {};
     for (const [key, value] of Object.entries(query || {})) {
-      const match = key.match(/^filter\[(.+)\]$/);
-      if (match) filters[match[1]] = value;
+      if (key.startsWith('f_') && key.length > 2) {
+        filters[key.slice(2)] = value;
+      }
     }
     console.log('[HR] findEntries query:', JSON.stringify(query));
     console.log('[HR] findEntries filters:', JSON.stringify(filters));
@@ -176,8 +177,9 @@ export class HrController {
   ) {
     const filters: Record<string, string> = {};
     for (const [key, value] of Object.entries(query || {})) {
-      const match = key.match(/^filter\[(.+)\]$/);
-      if (match) filters[match[1]] = value;
+      if (key.startsWith('f_') && key.length > 2) {
+        filters[key.slice(2)] = value;
+      }
     }
     const buffer = await this.hr.exportToExcel(listId, filters, search);
     const list = await this.hr.findListById(listId);

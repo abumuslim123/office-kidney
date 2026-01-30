@@ -52,7 +52,7 @@ export default function HrListView() {
     const params: Record<string, string> = {};
     if (search) params.search = search;
     for (const [k, v] of Object.entries(filters)) {
-      if (v && v.trim()) params[`filter[${k}]`] = v.trim();
+      if (v && v.trim()) params[`f_${k}`] = v.trim();
     }
     return params;
   };
@@ -86,7 +86,7 @@ export default function HrListView() {
       const params: Record<string, string> = {};
       if (search) params.search = search;
       for (const [k, v] of Object.entries(currentFilters)) {
-        if (v && v.trim()) params[`filter[${k}]`] = v.trim();
+        if (v && v.trim()) params[`f_${k}`] = v.trim();
       }
       console.log('[HrListView] fetching entries with params:', params);
       api.get<HrEntry[]>(`/hr/lists/${listId}/entries`, { params })
