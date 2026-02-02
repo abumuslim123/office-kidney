@@ -97,6 +97,22 @@ export class HrController {
     return this.hr.findListById(id);
   }
 
+  @Get('lists/:listId/share')
+  getListShareSettings(@Param('listId') listId: string) {
+    return this.hr.getListShareSettings(listId);
+  }
+
+  @Post('lists/:listId/share/enable')
+  enableListShare(@Param('listId') listId: string) {
+    return this.hr.enableListShare(listId);
+  }
+
+  @Post('lists/:listId/share/disable')
+  async disableListShare(@Param('listId') listId: string) {
+    await this.hr.disableListShare(listId);
+    return { success: true };
+  }
+
   @Post('lists')
   createList(@Body() dto: CreateListDto) {
     return this.hr.createList(dto);

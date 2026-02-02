@@ -419,6 +419,43 @@ export class HrService {
     return !!row;
   }
 
+  // ========== Lists share (per list) ==========
+
+  async getListShareSettings(listId: string): Promise<{ enabled: boolean; token: string; publicUrl: string | null }> {
+    const list = await this.findListById(listId);
+    if (!list.shareToken) {
+      return { enabled: false, token: '', publicUrl: null };
+    }
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const publicUrl = `${frontendUrl}/lists/${list.shareToken}`;
+    return { enabled: list.shareEnabled, token: list.shareToken, publicUrl: list.shareEnabled ? publicUrl : null };
+  }
+
+  async enableListShare(listId: string): Promise<{ publicUrl: string }> {
+    const list = await this.findListById(listId);
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    if (!list.shareToken) {
+      list.shareToken = randomUUID().replace(/-/g, '');
+    }
+    list.shareEnabled = true;
+    await this.listRepo.save(list);
+    return { publicUrl: `${frontendUrl}/lists/${list.shareToken}` };
+  }
+
+  async disableListShare(listId: string): Promise<void> {
+    const list = await this.findListById(listId);
+    list.shareEnabled = false;
+    await this.listRepo.save(list);
+  }
+
+  async findListByShareToken(token: string): Promise<HrList | null> {
+    if (!token) return null;
+    return this.listRepo.findOne({
+      where: { shareToken: token, shareEnabled: true },
+      relations: ['fields'],
+    });
+  }
+
   // ========== Export ==========
 
   async exportToExcel(

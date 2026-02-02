@@ -55,6 +55,9 @@ export default function HrListView() {
   const [importResult, setImportResult] = useState<{ imported: number; errors: string[] } | null>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
   const [expandedCells, setExpandedCells] = useState<Set<string>>(new Set());
+  const [entryDetailModal, setEntryDetailModal] = useState<HrEntry | null>(null);
+  const [listShareSettings, setListShareSettings] = useState<{ enabled: boolean; token: string; publicUrl: string | null } | null>(null);
+  const [listShareLoading, setListShareLoading] = useState(false);
 
   const getEntriesParams = () => {
     const params: Record<string, string> = {};
@@ -83,6 +86,47 @@ export default function HrListView() {
   useEffect(() => {
     load();
   }, [listId]);
+
+  const loadListShareSettings = async () => {
+    if (!listId) return;
+    try {
+      const res = await api.get<{ enabled: boolean; token: string; publicUrl: string | null }>(`/hr/lists/${listId}/share`);
+      setListShareSettings(res.data);
+    } catch {
+      setListShareSettings({ enabled: false, token: '', publicUrl: null });
+    }
+  };
+
+  useEffect(() => {
+    loadListShareSettings();
+  }, [listId]);
+
+  const enableListShare = async () => {
+    if (!listId) return;
+    setListShareLoading(true);
+    try {
+      const res = await api.post<{ publicUrl: string }>(`/hr/lists/${listId}/share/enable`);
+      setListShareSettings((s) => (s ? { ...s, enabled: true, publicUrl: res.data.publicUrl } : { enabled: true, token: '', publicUrl: res.data.publicUrl }));
+    } finally {
+      setListShareLoading(false);
+    }
+  };
+
+  const disableListShare = async () => {
+    if (!listId) return;
+    setListShareLoading(true);
+    try {
+      await api.post(`/hr/lists/${listId}/share/disable`);
+      setListShareSettings((s) => (s ? { ...s, enabled: false, publicUrl: null } : null));
+    } finally {
+      setListShareLoading(false);
+    }
+  };
+
+  const copyListShareLink = () => {
+    const url = listShareSettings?.publicUrl || (listShareSettings?.token ? `${window.location.origin}/lists/${listShareSettings.token}` : '');
+    if (url) navigator.clipboard.writeText(url).then(() => alert('Ссылка скопирована'));
+  };
 
   // Serialize filters to string for stable dependency comparison
   const filtersKey = JSON.stringify(filters);
@@ -413,7 +457,7 @@ export default function HrListView() {
         )}
       </div>
 
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-semibold text-gray-900">
           {list.name}
           {list.year && <span className="ml-2 text-gray-500 font-normal">({list.year})</span>}
@@ -485,6 +529,46 @@ export default function HrListView() {
             </button>
           )}
         </div>
+      </div>
+
+      <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+        <h3 className="text-sm font-medium text-gray-900 mb-2">Поделиться списком</h3>
+        {listShareSettings === null ? (
+          <span className="text-sm text-gray-500">Загрузка...</span>
+        ) : listShareSettings.enabled && listShareSettings.publicUrl ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              readOnly
+              value={listShareSettings.publicUrl}
+              className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded text-sm bg-white"
+            />
+            <button
+              type="button"
+              onClick={copyListShareLink}
+              className="px-3 py-2 border border-gray-300 text-sm rounded hover:bg-gray-100"
+            >
+              Скопировать ссылку
+            </button>
+            <button
+              type="button"
+              onClick={disableListShare}
+              disabled={listShareLoading}
+              className="px-3 py-2 border border-red-300 text-red-600 text-sm rounded hover:bg-red-50 disabled:opacity-50"
+            >
+              Отключить
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={enableListShare}
+            disabled={listShareLoading}
+            className="px-4 py-2 bg-accent text-white text-sm font-medium rounded hover:bg-accent-hover disabled:opacity-50"
+          >
+            Включить публичную ссылку
+          </button>
+        )}
       </div>
 
       {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
@@ -901,7 +985,14 @@ export default function HrListView() {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {entries.map((entry, idx) => (
-                <tr key={entry.id} className={`hover:bg-blue-50 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                <tr
+                  key={entry.id}
+                  className={`hover:bg-blue-50 cursor-pointer ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}
+                  onDoubleClick={(e) => {
+                    if ((e.target as HTMLElement).closest('button')) return;
+                    setEntryDetailModal(entry);
+                  }}
+                >
                   {fields.map((f) => {
                     const cellKey = `${entry.id}-${f.id}`;
                     const isExpanded = expandedCells.has(cellKey);
@@ -967,6 +1058,71 @@ export default function HrListView() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {entryDetailModal && list && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+          onClick={() => setEntryDetailModal(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="entry-detail-title"
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+              <h2 id="entry-detail-title" className="text-lg font-medium text-gray-900">Подробнее</h2>
+              <button
+                type="button"
+                onClick={() => setEntryDetailModal(null)}
+                className="px-3 py-1.5 border border-gray-300 text-sm rounded hover:bg-gray-50"
+              >
+                Закрыть
+              </button>
+            </div>
+            <div className="px-4 py-3 overflow-y-auto flex-1">
+              <dl className="space-y-3">
+                {fields.map((f) => {
+                  const value = entryDetailModal.data[f.name];
+                  const strValue = String(value ?? '');
+                  return (
+                    <div key={f.id}>
+                      <dt className="text-xs font-medium text-gray-500 uppercase tracking-wide">{f.name}</dt>
+                      <dd className="mt-0.5 text-sm text-gray-900">
+                        {f.fieldType === 'status' &&
+                        Array.isArray(f.options) &&
+                        f.options.length > 0 &&
+                        typeof f.options[0] === 'object' ? (
+                          (() => {
+                            const label = strValue;
+                            const opt = (f.options as StatusOption[]).find((o) => o.label === label);
+                            if (!label) return '—';
+                            return (
+                              <span
+                                className="inline-block px-2 py-0.5 rounded text-xs text-white"
+                                style={{ backgroundColor: opt?.color ?? '#6b7280' }}
+                              >
+                                {label}
+                              </span>
+                            );
+                          })()
+                        ) : f.fieldType === 'date' ? (
+                          formatDate(value)
+                        ) : f.fieldType === 'textarea' ? (
+                          <pre className="whitespace-pre-wrap font-sans text-sm">{strValue || '—'}</pre>
+                        ) : (
+                          strValue || '—'
+                        )}
+                      </dd>
+                    </div>
+                  );
+                })}
+              </dl>
+            </div>
+          </div>
         </div>
       )}
     </div>

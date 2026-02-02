@@ -11,13 +11,14 @@ import { HrEventsShare } from './entities/hr-events-share.entity';
 import { HrService } from './hr.service';
 import { HrController } from './hr.controller';
 import { HrPublicController } from './hr-public.controller';
+import { HrListsPublicController } from './hr-lists-public.controller';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([HrFolder, HrList, HrFieldDefinition, HrEntry, HrEvent, HrEventsShare]),
     MulterModule.register({ storage: multer.memoryStorage() }),
   ],
-  controllers: [HrController, HrPublicController],
+  controllers: [HrController, HrPublicController, HrListsPublicController],
   providers: [HrService],
   exports: [HrService],
 })

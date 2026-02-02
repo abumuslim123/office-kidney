@@ -30,6 +30,12 @@ export class HrList {
   @Column({ type: 'int', nullable: true })
   year: number | null;
 
+  @Column({ type: 'boolean', default: false })
+  shareEnabled: boolean;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  shareToken: string | null;
+
   @OneToMany(() => HrFieldDefinition, (f) => f.list)
   fields: HrFieldDefinition[];
 
