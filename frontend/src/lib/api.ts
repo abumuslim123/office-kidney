@@ -20,3 +20,10 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
+
+/** Public API (no auth) for shared calendar */
+export const publicApi = axios.create({
+  baseURL: getBaseURL(),
+  headers: { 'Content-Type': 'application/json' },
+  withCredentials: true,
+});

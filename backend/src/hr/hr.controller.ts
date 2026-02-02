@@ -147,6 +147,22 @@ export class HrController {
     return { success: true };
   }
 
+  @Get('events/share')
+  getShareSettings() {
+    return this.hr.getShareSettings();
+  }
+
+  @Post('events/share/enable')
+  enableShare() {
+    return this.hr.enableShare();
+  }
+
+  @Post('events/share/disable')
+  async disableShare() {
+    await this.hr.disableShare();
+    return { success: true };
+  }
+
   // ========== Fields ==========
 
   @Get('lists/:listId/fields')

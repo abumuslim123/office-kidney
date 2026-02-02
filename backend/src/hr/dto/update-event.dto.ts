@@ -10,6 +10,14 @@ export class UpdateEventDto {
   @IsOptional()
   date?: string;
 
+  @IsDateString()
+  @IsOptional()
+  endDate?: string;
+
+  @IsString()
+  @IsOptional()
+  color?: string | null;
+
   @IsString()
   @IsOptional()
   description?: string | null;

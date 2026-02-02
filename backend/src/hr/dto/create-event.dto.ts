@@ -8,6 +8,14 @@ export class CreateEventDto {
   @IsDateString()
   date: string;
 
+  @IsDateString()
+  @IsOptional()
+  endDate?: string;
+
+  @IsString()
+  @IsOptional()
+  color?: string | null;
+
   @IsString()
   @IsOptional()
   description?: string | null;

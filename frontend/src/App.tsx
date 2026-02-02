@@ -10,6 +10,7 @@ import Services from './pages/Services';
 import HR from './pages/HR';
 import HrListView from './pages/HrListView';
 import HrEvents from './pages/HrEvents';
+import HrEventsPublic from './pages/HrEventsPublic';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -26,6 +27,7 @@ function App() {
   return (
     <Routes>
       <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <Login />} />
+      <Route path="calendar/:token" element={<HrEventsPublic />} />
       <Route
         path="/"
         element={

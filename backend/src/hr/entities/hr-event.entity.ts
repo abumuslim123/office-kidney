@@ -17,6 +17,12 @@ export class HrEvent {
   @Column({ type: 'date' })
   date: string;
 
+  @Column({ type: 'date', nullable: true })
+  endDate: string | null;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  color: string | null;
+
   @Column({ type: 'text', nullable: true })
   description: string | null;
 

@@ -6,10 +6,44 @@ type HrEvent = {
   id: string;
   title: string;
   date: string;
+  endDate: string | null;
+  color: string | null;
   description: string | null;
   createdAt: string;
   updatedAt: string;
 };
+
+const EVENT_COLORS = [
+  { value: '', label: 'По умолчанию' },
+  { value: '#3b82f6', label: 'Синий' },
+  { value: '#22c55e', label: 'Зелёный' },
+  { value: '#eab308', label: 'Жёлтый' },
+  { value: '#f97316', label: 'Оранжевый' },
+  { value: '#ef4444', label: 'Красный' },
+  { value: '#8b5cf6', label: 'Фиолетовый' },
+  { value: '#ec4899', label: 'Розовый' },
+  { value: '#06b6d4', label: 'Бирюзовый' },
+  { value: '#64748b', label: 'Серый' },
+];
+
+function eventEndDate(event: HrEvent): string {
+  return event.endDate ?? event.date;
+}
+
+function eventIntersectsDay(event: HrEvent, dayStr: string): boolean {
+  const start = event.date.slice(0, 10);
+  const end = eventEndDate(event).slice(0, 10);
+  return dayStr >= start && dayStr <= end;
+}
+
+function eventDayPosition(event: HrEvent, dayStr: string): 'first' | 'middle' | 'last' | 'only' {
+  const start = event.date.slice(0, 10);
+  const end = eventEndDate(event).slice(0, 10);
+  if (start === end) return 'only';
+  if (dayStr === start) return 'first';
+  if (dayStr === end) return 'last';
+  return 'middle';
+}
 
 const MONTH_NAMES = [
   'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
@@ -44,8 +78,10 @@ export default function HrEvents() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingEvent, setEditingEvent] = useState<HrEvent | null>(null);
-  const [form, setForm] = useState({ title: '', date: '', description: '' });
+  const [form, setForm] = useState({ title: '', date: '', endDate: '', color: '', description: '' });
   const [error, setError] = useState('');
+  const [shareSettings, setShareSettings] = useState<{ enabled: boolean; token: string; publicUrl: string | null } | null>(null);
+  const [shareLoading, setShareLoading] = useState(false);
 
   const { startDate, endDate } = getMonthBounds(year, month);
 
@@ -65,13 +101,48 @@ export default function HrEvents() {
     loadEvents();
   }, [startDate, endDate]);
 
+  const loadShareSettings = async () => {
+    try {
+      const res = await api.get<{ enabled: boolean; token: string; publicUrl: string | null }>('/hr/events/share');
+      setShareSettings(res.data);
+    } catch {
+      setShareSettings({ enabled: false, token: '', publicUrl: null });
+    }
+  };
+
+  useEffect(() => {
+    loadShareSettings();
+  }, []);
+
+  const enableShare = async () => {
+    setShareLoading(true);
+    try {
+      const res = await api.post<{ publicUrl: string }>('/hr/events/share/enable');
+      setShareSettings((s) => (s ? { ...s, enabled: true, publicUrl: res.data.publicUrl } : { enabled: true, token: '', publicUrl: res.data.publicUrl }));
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
+  const disableShare = async () => {
+    setShareLoading(true);
+    try {
+      await api.post('/hr/events/share/disable');
+      setShareSettings((s) => (s ? { ...s, enabled: false, publicUrl: null } : null));
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
+  const copyShareLink = () => {
+    const url = shareSettings?.publicUrl || (shareSettings?.token ? `${window.location.origin}/calendar/${shareSettings.token}` : '');
+    if (url) navigator.clipboard.writeText(url).then(() => alert('Ссылка скопирована'));
+  };
+
   const days = getCalendarDays(year, month);
-  const eventsByDate: Record<string, HrEvent[]> = {};
-  events.forEach((e) => {
-    const d = e.date.slice(0, 10);
-    if (!eventsByDate[d]) eventsByDate[d] = [];
-    eventsByDate[d].push(e);
-  });
+  function getEventsForDay(dayStr: string): HrEvent[] {
+    return events.filter((e) => eventIntersectsDay(e, dayStr));
+  }
 
   const openCreate = (day?: number) => {
     const dateStr =
@@ -79,7 +150,7 @@ export default function HrEvents() {
         ? `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
         : `${year}-${String(month + 1).padStart(2, '0')}-01`;
     setEditingEvent(null);
-    setForm({ title: '', date: dateStr, description: '' });
+    setForm({ title: '', date: dateStr, endDate: '', color: '', description: '' });
     setShowForm(true);
     setError('');
   };
@@ -89,6 +160,8 @@ export default function HrEvents() {
     setForm({
       title: event.title,
       date: event.date.slice(0, 10),
+      endDate: event.endDate ? event.endDate.slice(0, 10) : '',
+      color: event.color || '',
       description: event.description || '',
     });
     setShowForm(true);
@@ -103,12 +176,16 @@ export default function HrEvents() {
         await api.put(`/hr/events/${editingEvent.id}`, {
           title: form.title.trim(),
           date: form.date,
+          endDate: form.endDate.trim() || null,
+          color: form.color.trim() || null,
           description: form.description.trim() || null,
         });
       } else {
         await api.post('/hr/events', {
           title: form.title.trim(),
           date: form.date,
+          endDate: form.endDate.trim() || null,
+          color: form.color.trim() || null,
           description: form.description.trim() || null,
         });
       }
@@ -186,6 +263,46 @@ export default function HrEvents() {
         </button>
       </div>
 
+      <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+        <h3 className="text-sm font-medium text-gray-900 mb-2">Поделиться календарём</h3>
+        {shareSettings === null ? (
+          <span className="text-sm text-gray-500">Загрузка...</span>
+        ) : shareSettings.enabled && shareSettings.publicUrl ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              readOnly
+              value={shareSettings.publicUrl}
+              className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded text-sm bg-white"
+            />
+            <button
+              type="button"
+              onClick={copyShareLink}
+              className="px-3 py-2 border border-gray-300 text-sm rounded hover:bg-gray-100"
+            >
+              Скопировать ссылку
+            </button>
+            <button
+              type="button"
+              onClick={disableShare}
+              disabled={shareLoading}
+              className="px-3 py-2 border border-red-300 text-red-600 text-sm rounded hover:bg-red-50 disabled:opacity-50"
+            >
+              Отключить
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={enableShare}
+            disabled={shareLoading}
+            className="px-4 py-2 bg-accent text-white text-sm font-medium rounded hover:bg-accent-hover disabled:opacity-50"
+          >
+            Включить публичную ссылку
+          </button>
+        )}
+      </div>
+
       {showForm && (
         <form onSubmit={handleSubmit} className="mb-6 p-4 bg-white border border-gray-200 rounded-lg max-w-md">
           <h3 className="text-lg font-medium text-gray-900 mb-3">
@@ -201,6 +318,7 @@ export default function HrEvents() {
               required
               className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
             />
+            <label className="text-sm text-gray-600">Дата начала</label>
             <input
               type="date"
               value={form.date}
@@ -208,6 +326,37 @@ export default function HrEvents() {
               required
               className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
             />
+            <label className="text-sm text-gray-600">Дата окончания (необязательно)</label>
+            <input
+              type="date"
+              value={form.endDate}
+              onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
+              min={form.date}
+              className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+            />
+            <label className="text-sm text-gray-600">Цвет</label>
+            <div className="flex flex-wrap gap-2 items-center">
+              {EVENT_COLORS.map((c) => (
+                <label key={c.value || 'default'} className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="color"
+                    value={c.value}
+                    checked={form.color === c.value}
+                    onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
+                    className="sr-only"
+                  />
+                  <span
+                    className={`w-6 h-6 rounded-full border-2 flex-shrink-0 ${
+                      form.color === c.value ? 'border-gray-900 scale-110' : 'border-gray-300 hover:border-gray-500'
+                    }`}
+                    style={{ backgroundColor: c.value || 'var(--accent, #2563eb)' }}
+                    title={c.label}
+                  />
+                  {c.value === '' && <span className="text-xs text-gray-600">{c.label}</span>}
+                </label>
+              ))}
+            </div>
             <textarea
               placeholder="Описание (необязательно)"
               value={form.description}
@@ -278,7 +427,7 @@ export default function HrEvents() {
                   return <div key={`empty-${idx}`} className="min-h-[80px] bg-gray-50 rounded" />;
                 }
                 const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                const dayEvents = eventsByDate[dateKey] || [];
+                const dayEvents = getEventsForDay(dateKey);
                 return (
                   <div
                     key={dateKey}
@@ -296,17 +445,27 @@ export default function HrEvents() {
                       </button>
                     </div>
                     <div className="mt-1 flex flex-col gap-0.5 overflow-auto">
-                      {dayEvents.map((ev) => (
-                        <button
-                          key={ev.id}
-                          type="button"
-                          onClick={() => openEdit(ev)}
-                          className="text-left text-xs px-1.5 py-0.5 rounded bg-accent/10 text-gray-800 hover:bg-accent/20 truncate"
-                          title={ev.description || ev.title}
-                        >
-                          {ev.title}
-                        </button>
-                      ))}
+                      {dayEvents.map((ev) => {
+                        const pos = eventDayPosition(ev, dateKey);
+                        const rounded =
+                          pos === 'only' ? 'rounded' : pos === 'first' ? 'rounded-l' : pos === 'last' ? 'rounded-r' : 'rounded-none';
+                        const style = ev.color ? { backgroundColor: `${ev.color}20` } : undefined;
+                        const className = ev.color
+                          ? `text-left text-xs px-1.5 py-1 min-h-[1.5rem] truncate ${rounded} hover:opacity-90`
+                          : `text-left text-xs px-1.5 py-1 min-h-[1.5rem] truncate ${rounded} hover:opacity-90 bg-accent/10 text-gray-800 hover:bg-accent/20`;
+                        return (
+                          <button
+                            key={`${ev.id}-${dateKey}`}
+                            type="button"
+                            onClick={() => openEdit(ev)}
+                            className={className}
+                            style={style}
+                            title={ev.description || ev.title}
+                          >
+                            {ev.title}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 );

@@ -7,15 +7,17 @@ import { HrList } from './entities/hr-list.entity';
 import { HrFieldDefinition } from './entities/hr-field-definition.entity';
 import { HrEntry } from './entities/hr-entry.entity';
 import { HrEvent } from './entities/hr-event.entity';
+import { HrEventsShare } from './entities/hr-events-share.entity';
 import { HrService } from './hr.service';
 import { HrController } from './hr.controller';
+import { HrPublicController } from './hr-public.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([HrFolder, HrList, HrFieldDefinition, HrEntry, HrEvent]),
+    TypeOrmModule.forFeature([HrFolder, HrList, HrFieldDefinition, HrEntry, HrEvent, HrEventsShare]),
     MulterModule.register({ storage: multer.memoryStorage() }),
   ],
-  controllers: [HrController],
+  controllers: [HrController, HrPublicController],
   providers: [HrService],
   exports: [HrService],
 })

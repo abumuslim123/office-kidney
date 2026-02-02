@@ -1,12 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, ILike } from 'typeorm';
+import { randomUUID } from 'crypto';
 import * as ExcelJS from 'exceljs';
 import { HrFolder } from './entities/hr-folder.entity';
 import { HrList } from './entities/hr-list.entity';
 import { HrFieldDefinition } from './entities/hr-field-definition.entity';
 import { HrEntry } from './entities/hr-entry.entity';
 import { HrEvent } from './entities/hr-event.entity';
+import { HrEventsShare } from './entities/hr-events-share.entity';
 import { CreateFolderDto } from './dto/create-folder.dto';
 import { UpdateFolderDto } from './dto/update-folder.dto';
 import { CreateListDto } from './dto/create-list.dto';
@@ -31,6 +33,8 @@ export class HrService {
     private entryRepo: Repository<HrEntry>,
     @InjectRepository(HrEvent)
     private eventRepo: Repository<HrEvent>,
+    @InjectRepository(HrEventsShare)
+    private shareRepo: Repository<HrEventsShare>,
   ) {}
 
   // ========== Folders ==========
@@ -330,7 +334,7 @@ export class HrService {
   async findEventsByDateRange(startDate: string, endDate: string): Promise<HrEvent[]> {
     return this.eventRepo
       .createQueryBuilder('e')
-      .where('e.date >= :startDate', { startDate })
+      .where('(COALESCE(e.endDate, e.date) >= :startDate)', { startDate })
       .andWhere('e.date <= :endDate', { endDate })
       .orderBy('e.date', 'ASC')
       .addOrderBy('e.createdAt', 'ASC')
@@ -347,6 +351,8 @@ export class HrService {
     const event = this.eventRepo.create({
       title: dto.title,
       date: dto.date,
+      endDate: dto.endDate ?? null,
+      color: dto.color ?? null,
       description: dto.description ?? null,
     });
     return this.eventRepo.save(event);
@@ -356,6 +362,8 @@ export class HrService {
     const event = await this.findEventById(id);
     if (dto.title !== undefined) event.title = dto.title;
     if (dto.date !== undefined) event.date = dto.date;
+    if (dto.endDate !== undefined) event.endDate = dto.endDate ?? null;
+    if (dto.color !== undefined) event.color = dto.color ?? null;
     if (dto.description !== undefined) event.description = dto.description;
     return this.eventRepo.save(event);
   }
@@ -363,6 +371,52 @@ export class HrService {
   async deleteEvent(id: string): Promise<void> {
     const event = await this.findEventById(id);
     await this.eventRepo.remove(event);
+  }
+
+  // ========== Events share ==========
+
+  async getShareSettings(): Promise<{ enabled: boolean; token: string; publicUrl: string | null }> {
+    const row = await this.shareRepo.findOne({ where: {} });
+    if (!row || !row.token) {
+      return { enabled: false, token: '', publicUrl: null };
+    }
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const publicUrl = `${frontendUrl}/calendar/${row.token}`;
+    return { enabled: row.enabled, token: row.token, publicUrl: row.enabled ? publicUrl : null };
+  }
+
+  async enableShare(): Promise<{ publicUrl: string }> {
+    const row = await this.shareRepo.findOne({ where: {} });
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    if (!row) {
+      const token = randomUUID().replace(/-/g, '');
+      const newRow = this.shareRepo.create({ enabled: true, token });
+      await this.shareRepo.save(newRow);
+      return { publicUrl: `${frontendUrl}/calendar/${token}` };
+    }
+    if (!row.token) {
+      row.token = randomUUID().replace(/-/g, '');
+      row.enabled = true;
+      await this.shareRepo.save(row);
+      return { publicUrl: `${frontendUrl}/calendar/${row.token}` };
+    }
+    row.enabled = true;
+    await this.shareRepo.save(row);
+    return { publicUrl: `${frontendUrl}/calendar/${row.token}` };
+  }
+
+  async disableShare(): Promise<void> {
+    const row = await this.shareRepo.findOne({ where: {} });
+    if (row) {
+      row.enabled = false;
+      await this.shareRepo.save(row);
+    }
+  }
+
+  async isShareEnabled(token: string): Promise<boolean> {
+    if (!token) return false;
+    const row = await this.shareRepo.findOne({ where: { token, enabled: true } });
+    return !!row;
   }
 
   // ========== Export ==========
