@@ -105,6 +105,46 @@ export class HrService {
     await this.listRepo.remove(list);
   }
 
+  async copyList(
+    sourceListId: string,
+    dto: { folderId?: string; name?: string },
+  ): Promise<HrList> {
+    const list = await this.findListById(sourceListId);
+    const fields = await this.findFieldsByList(sourceListId);
+    const entries = await this.findEntriesByList(sourceListId);
+
+    const targetFolderId = dto.folderId ?? list.folderId;
+    await this.findFolderById(targetFolderId);
+
+    const newList = this.listRepo.create({
+      folderId: targetFolderId,
+      name: dto.name ?? `${list.name} (копия)`,
+      year: list.year,
+    });
+    const savedList = await this.listRepo.save(newList);
+
+    for (const f of fields) {
+      const field = this.fieldRepo.create({
+        listId: savedList.id,
+        name: f.name,
+        fieldType: f.fieldType,
+        options: f.options,
+        order: f.order,
+      });
+      await this.fieldRepo.save(field);
+    }
+
+    for (const e of entries) {
+      const entry = this.entryRepo.create({
+        listId: savedList.id,
+        data: { ...e.data },
+      });
+      await this.entryRepo.save(entry);
+    }
+
+    return this.findListById(savedList.id);
+  }
+
   async createListFromFile(
     fileBuffer: Buffer,
     folderId: string,

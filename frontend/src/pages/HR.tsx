@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 
 type HrFolder = {
   id: string;
@@ -19,6 +20,8 @@ type HrList = {
 export default function HR() {
   const { folderId } = useParams<{ folderId?: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const hasPerm = (slug: string) => user?.permissions?.some((p) => p.slug === slug) ?? false;
   const isFolderView = Boolean(folderId);
 
   // Folders view state
@@ -127,6 +130,16 @@ export default function HR() {
     try {
       await api.delete(`/hr/lists/${id}`);
       if (folderId) loadFolder(folderId);
+    } catch {}
+  };
+
+  const handleCopyList = async (list: HrList) => {
+    try {
+      const res = await api.post<HrList>(`/hr/lists/${list.id}/copy`, {
+        name: `${list.name} (копия)`,
+      });
+      if (folderId) loadFolder(folderId);
+      navigate(`/hr/${res.data.id}`);
     } catch {}
   };
 
@@ -286,13 +299,24 @@ export default function HR() {
                         {l.name}
                         {l.year && <span className="ml-2 text-gray-500 font-normal">({l.year})</span>}
                       </Link>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteList(l.id)}
-                        className="text-red-600 hover:underline text-sm"
-                      >
-                        Удалить
-                      </button>
+                      <span className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleCopyList(l)}
+                          className="text-accent hover:underline text-sm"
+                        >
+                          Копировать
+                        </button>
+                        {hasPerm('hr_delete_entries') && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteList(l.id)}
+                            className="text-red-600 hover:underline text-sm"
+                          >
+                            Удалить
+                          </button>
+                        )}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -351,13 +375,15 @@ export default function HR() {
                     <span className="text-gray-500 font-normal text-sm">({f.lists.length})</span>
                   )}
                 </Link>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteFolder(f.id)}
-                  className="text-red-600 hover:underline text-sm"
-                >
-                  Удалить папку
-                </button>
+                {hasPerm('hr_delete_folders') && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteFolder(f.id)}
+                    className="text-red-600 hover:underline text-sm"
+                  >
+                    Удалить папку
+                  </button>
+                )}
               </div>
             ))}
           </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 
 type StatusOption = { label: string; color: string };
 
@@ -28,6 +29,8 @@ type HrEntry = {
 
 export default function HrListView() {
   const { listId } = useParams<{ listId: string }>();
+  const { user } = useAuth();
+  const hasPerm = (slug: string) => user?.permissions?.some((p) => p.slug === slug) ?? false;
   const [list, setList] = useState<HrList | null>(null);
   const [entries, setEntries] = useState<HrEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -412,14 +415,16 @@ export default function HrListView() {
             className="hidden"
             onChange={handleImportFile}
           />
-          <button
-            type="button"
-            onClick={() => importFileRef.current?.click()}
-            disabled={importing || fields.length === 0}
-            className="px-3 py-1.5 border border-gray-300 text-sm rounded hover:bg-gray-50 disabled:opacity-50"
-          >
-            {importing ? 'Импорт...' : 'Импорт'}
-          </button>
+          {hasPerm('hr_edit_entries') && (
+            <button
+              type="button"
+              onClick={() => importFileRef.current?.click()}
+              disabled={importing || fields.length === 0}
+              className="px-3 py-1.5 border border-gray-300 text-sm rounded hover:bg-gray-50 disabled:opacity-50"
+            >
+              {importing ? 'Импорт...' : 'Импорт'}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleExport}
@@ -428,32 +433,38 @@ export default function HrListView() {
           >
             {exporting ? 'Экспорт...' : 'Экспорт Excel'}
           </button>
-          <button
-            type="button"
-            onClick={handleDeleteAllEntries}
-            disabled={entries.length === 0}
-            className="px-3 py-1.5 border border-red-300 text-red-600 text-sm rounded hover:bg-red-50 disabled:opacity-50"
-          >
-            Удалить все
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowFieldForm(!showFieldForm)}
-            className="px-3 py-1.5 border border-gray-300 text-sm rounded hover:bg-gray-50"
-          >
-            {showFieldForm ? 'Отмена' : 'Настроить поля'}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setEditingEntry(null);
-              setEntryData({});
-              setShowEntryForm(!showEntryForm);
-            }}
-            className="px-4 py-2 bg-accent text-white text-sm font-medium rounded hover:bg-accent-hover"
-          >
-            {showEntryForm && !editingEntry ? 'Отмена' : 'Добавить запись'}
-          </button>
+          {hasPerm('hr_delete_entries') && (
+            <button
+              type="button"
+              onClick={handleDeleteAllEntries}
+              disabled={entries.length === 0}
+              className="px-3 py-1.5 border border-red-300 text-red-600 text-sm rounded hover:bg-red-50 disabled:opacity-50"
+            >
+              Удалить все
+            </button>
+          )}
+          {(hasPerm('hr_edit_fields') || hasPerm('hr_delete_fields')) && (
+            <button
+              type="button"
+              onClick={() => setShowFieldForm(!showFieldForm)}
+              className="px-3 py-1.5 border border-gray-300 text-sm rounded hover:bg-gray-50"
+            >
+              {showFieldForm ? 'Отмена' : 'Настроить поля'}
+            </button>
+          )}
+          {hasPerm('hr_edit_entries') && (
+            <button
+              type="button"
+              onClick={() => {
+                setEditingEntry(null);
+                setEntryData({});
+                setShowEntryForm(!showEntryForm);
+              }}
+              className="px-4 py-2 bg-accent text-white text-sm font-medium rounded hover:bg-accent-hover"
+            >
+              {showEntryForm && !editingEntry ? 'Отмена' : 'Добавить запись'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -511,20 +522,24 @@ export default function HrListView() {
                         : (f.options as string[]).join(', ')}]
                     </span>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => startEditingField(f)}
-                    className="text-accent hover:underline text-sm"
-                  >
-                    Редактировать
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteField(f.id)}
-                    className="text-red-600 hover:underline ml-auto"
-                  >
-                    Удалить
-                  </button>
+                  {hasPerm('hr_edit_fields') && (
+                    <button
+                      type="button"
+                      onClick={() => startEditingField(f)}
+                      className="text-accent hover:underline text-sm"
+                    >
+                      Редактировать
+                    </button>
+                  )}
+                  {hasPerm('hr_delete_fields') && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteField(f.id)}
+                      className="text-red-600 hover:underline ml-auto"
+                    >
+                      Удалить
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -690,9 +705,11 @@ export default function HrListView() {
                 ))}
               </div>
             )}
-            <button type="submit" className="px-3 py-1.5 bg-accent text-white text-sm rounded hover:bg-accent-hover">
-              Добавить поле
-            </button>
+            {hasPerm('hr_edit_fields') && (
+              <button type="submit" className="px-3 py-1.5 bg-accent text-white text-sm rounded hover:bg-accent-hover">
+                Добавить поле
+              </button>
+            )}
           </form>
         </div>
       )}
@@ -908,20 +925,24 @@ export default function HrListView() {
                     );
                   })}
                   <td className="px-4 py-3 whitespace-nowrap">
-                    <button
-                      type="button"
-                      onClick={() => startEditEntry(entry)}
-                      className="text-accent hover:underline mr-3"
-                    >
-                      Изменить
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteEntry(entry.id)}
-                      className="text-red-600 hover:underline"
-                    >
-                      Удалить
-                    </button>
+                    {hasPerm('hr_edit_entries') && (
+                      <button
+                        type="button"
+                        onClick={() => startEditEntry(entry)}
+                        className="text-accent hover:underline mr-3"
+                      >
+                        Изменить
+                      </button>
+                    )}
+                    {hasPerm('hr_delete_entries') && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteEntry(entry.id)}
+                        className="text-red-600 hover:underline"
+                      >
+                        Удалить
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

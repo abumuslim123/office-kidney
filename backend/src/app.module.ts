@@ -13,6 +13,7 @@ import { InitialSchema1738166400000 } from './migrations/1738166400000-InitialSc
 import { AddPermissions1738252800000 } from './migrations/1738252800000-AddPermissions';
 import { AddHrTables1738339200000 } from './migrations/1738339200000-AddHrTables';
 import { AddHrFolders1738425600000 } from './migrations/1738425600000-AddHrFolders';
+import { AddHrDetailPermissions1738512000000 } from './migrations/1738512000000-AddHrDetailPermissions';
 
 @Module({
   imports: [
@@ -26,7 +27,7 @@ import { AddHrFolders1738425600000 } from './migrations/1738425600000-AddHrFolde
       database: process.env.DB_DATABASE || 'kidney_office',
       autoLoadEntities: true,
       synchronize: process.env.NODE_ENV !== 'production',
-      migrations: [InitialSchema1738166400000, AddPermissions1738252800000, AddHrTables1738339200000, AddHrFolders1738425600000],
+      migrations: [InitialSchema1738166400000, AddPermissions1738252800000, AddHrTables1738339200000, AddHrFolders1738425600000, AddHrDetailPermissions1738512000000],
       migrationsRun: false,
     }),
     HealthModule,

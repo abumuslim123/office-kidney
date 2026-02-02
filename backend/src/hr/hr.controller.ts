@@ -23,6 +23,7 @@ import { Permissions } from '../auth/decorators/permissions.decorator';
 import { CreateFolderDto } from './dto/create-folder.dto';
 import { UpdateFolderDto } from './dto/update-folder.dto';
 import { CreateListDto } from './dto/create-list.dto';
+import { CopyListDto } from './dto/copy-list.dto';
 import { UpdateListDto } from './dto/update-list.dto';
 import { CreateFieldDto } from './dto/create-field.dto';
 import { UpdateFieldDto } from './dto/update-field.dto';
@@ -58,6 +59,7 @@ export class HrController {
   }
 
   @Delete('folders/:id')
+  @Permissions('hr', 'hr_delete_folders')
   async deleteFolder(@Param('id') id: string) {
     await this.hr.deleteFolder(id);
     return { success: true };
@@ -104,9 +106,15 @@ export class HrController {
   }
 
   @Delete('lists/:id')
+  @Permissions('hr', 'hr_delete_entries')
   async deleteList(@Param('id') id: string) {
     await this.hr.deleteList(id);
     return { success: true };
+  }
+
+  @Post('lists/:id/copy')
+  copyList(@Param('id') id: string, @Body() dto: CopyListDto) {
+    return this.hr.copyList(id, dto);
   }
 
   // ========== Fields ==========
@@ -117,16 +125,19 @@ export class HrController {
   }
 
   @Post('lists/:listId/fields')
+  @Permissions('hr', 'hr_edit_fields')
   createField(@Param('listId') listId: string, @Body() dto: CreateFieldDto) {
     return this.hr.createField(listId, dto);
   }
 
   @Put('fields/:id')
+  @Permissions('hr', 'hr_edit_fields')
   updateField(@Param('id') id: string, @Body() dto: UpdateFieldDto) {
     return this.hr.updateField(id, dto);
   }
 
   @Delete('fields/:id')
+  @Permissions('hr', 'hr_delete_fields')
   async deleteField(@Param('id') id: string) {
     await this.hr.deleteField(id);
     return { success: true };
@@ -154,22 +165,26 @@ export class HrController {
   }
 
   @Post('lists/:listId/entries')
+  @Permissions('hr', 'hr_edit_entries')
   createEntry(@Param('listId') listId: string, @Body() dto: CreateEntryDto) {
     return this.hr.createEntry(listId, dto);
   }
 
   @Put('entries/:id')
+  @Permissions('hr', 'hr_edit_entries')
   updateEntry(@Param('id') id: string, @Body() dto: UpdateEntryDto) {
     return this.hr.updateEntry(id, dto);
   }
 
   @Delete('entries/:id')
+  @Permissions('hr', 'hr_delete_entries')
   async deleteEntry(@Param('id') id: string) {
     await this.hr.deleteEntry(id);
     return { success: true };
   }
 
   @Delete('lists/:listId/entries')
+  @Permissions('hr', 'hr_delete_entries')
   async deleteAllEntries(@Param('listId') listId: string) {
     return this.hr.deleteAllEntries(listId);
   }
@@ -191,6 +206,7 @@ export class HrController {
 
   @Post('lists/:listId/import')
   @UseInterceptors(FileInterceptor('file', { storage: multer.memoryStorage() }))
+  @Permissions('hr', 'hr_edit_entries')
   async importEntries(
     @Param('listId') listId: string,
     @UploadedFile() file: Express.Multer.File,
