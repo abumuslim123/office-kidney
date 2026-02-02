@@ -29,6 +29,8 @@ import { CreateFieldDto } from './dto/create-field.dto';
 import { UpdateFieldDto } from './dto/update-field.dto';
 import { CreateEntryDto } from './dto/create-entry.dto';
 import { UpdateEntryDto } from './dto/update-entry.dto';
+import { CreateEventDto } from './dto/create-event.dto';
+import { UpdateEventDto } from './dto/update-event.dto';
 
 @Controller('hr')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -117,6 +119,34 @@ export class HrController {
     return this.hr.copyList(id, dto);
   }
 
+  // ========== Events ==========
+
+  @Get('events')
+  findEvents(
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+  ) {
+    if (!startDate || !endDate)
+      throw new BadRequestException('startDate and endDate are required');
+    return this.hr.findEventsByDateRange(startDate, endDate);
+  }
+
+  @Post('events')
+  createEvent(@Body() dto: CreateEventDto) {
+    return this.hr.createEvent(dto);
+  }
+
+  @Put('events/:id')
+  updateEvent(@Param('id') id: string, @Body() dto: UpdateEventDto) {
+    return this.hr.updateEvent(id, dto);
+  }
+
+  @Delete('events/:id')
+  async deleteEvent(@Param('id') id: string) {
+    await this.hr.deleteEvent(id);
+    return { success: true };
+  }
+
   // ========== Fields ==========
 
   @Get('lists/:listId/fields')
@@ -125,19 +155,19 @@ export class HrController {
   }
 
   @Post('lists/:listId/fields')
-  @Permissions('hr', 'hr_edit_fields')
+  @Permissions('hr', 'hr_manage_fields')
   createField(@Param('listId') listId: string, @Body() dto: CreateFieldDto) {
     return this.hr.createField(listId, dto);
   }
 
   @Put('fields/:id')
-  @Permissions('hr', 'hr_edit_fields')
+  @Permissions('hr', 'hr_manage_fields')
   updateField(@Param('id') id: string, @Body() dto: UpdateFieldDto) {
     return this.hr.updateField(id, dto);
   }
 
   @Delete('fields/:id')
-  @Permissions('hr', 'hr_delete_fields')
+  @Permissions('hr', 'hr_manage_fields')
   async deleteField(@Param('id') id: string) {
     await this.hr.deleteField(id);
     return { success: true };
@@ -184,7 +214,7 @@ export class HrController {
   }
 
   @Delete('lists/:listId/entries')
-  @Permissions('hr', 'hr_delete_entries')
+  @Permissions('hr', 'hr_delete_all_entries')
   async deleteAllEntries(@Param('listId') listId: string) {
     return this.hr.deleteAllEntries(listId);
   }

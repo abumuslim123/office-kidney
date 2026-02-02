@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, NavLink, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -36,6 +36,8 @@ export default function HR() {
   const [folderLoading, setFolderLoading] = useState(false);
   const [showListForm, setShowListForm] = useState(false);
   const [listForm, setListForm] = useState({ name: '', year: '' });
+  const [editingList, setEditingList] = useState<HrList | null>(null);
+  const [editListForm, setEditListForm] = useState({ name: '', year: '' });
   const [showImportForm, setShowImportForm] = useState(false);
   const [importForm, setImportForm] = useState({ name: '', year: '' });
   const [importing, setImporting] = useState(false);
@@ -143,6 +145,35 @@ export default function HR() {
     } catch {}
   };
 
+  const openEditList = (list: HrList) => {
+    setEditingList(list);
+    setEditListForm({
+      name: list.name,
+      year: list.year != null ? String(list.year) : '',
+    });
+    setListError('');
+  };
+
+  const handleUpdateList = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingList || !folderId) return;
+    setListError('');
+    try {
+      await api.put(`/hr/lists/${editingList.id}`, {
+        name: editListForm.name.trim(),
+        year: editListForm.year.trim() ? parseInt(editListForm.year, 10) : null,
+      });
+      setEditingList(null);
+      loadFolder(folderId);
+    } catch (err: unknown) {
+      const data = err && typeof err === 'object' && 'response' in err
+        ? (err as { response?: { data?: { message?: string | string[] } } }).response?.data
+        : null;
+      const msg = data?.message;
+      setListError(Array.isArray(msg) ? msg.join(', ') : (msg as string) || 'Ошибка сохранения');
+    }
+  };
+
   const handleCreateFromFile = async (e: React.FormEvent) => {
     e.preventDefault();
     const file = importFileRef.current?.files?.[0];
@@ -184,6 +215,25 @@ export default function HR() {
   if (isFolderView) {
     return (
       <div>
+        <div className="flex gap-2 mb-4 border-b border-gray-200 pb-2">
+          <NavLink
+            to="/hr"
+            end
+            className={({ isActive }) =>
+              `px-3 py-2 rounded text-sm font-medium ${isActive ? 'bg-accent text-white' : 'text-gray-600 hover:bg-gray-100'}`
+            }
+          >
+            Списки
+          </NavLink>
+          <NavLink
+            to="/hr/events"
+            className={({ isActive }) =>
+              `px-3 py-2 rounded text-sm font-medium ${isActive ? 'bg-accent text-white' : 'text-gray-600 hover:bg-gray-100'}`
+            }
+          >
+            План мероприятий
+          </NavLink>
+        </div>
         <div className="flex items-center gap-4 mb-6">
           <Link to="/hr" className="text-accent hover:underline text-sm">
             ← Назад к папкам
@@ -272,6 +322,42 @@ export default function HR() {
               </form>
             )}
 
+            {editingList && (
+              <form onSubmit={handleUpdateList} className="mb-6 p-4 bg-white border border-gray-200 rounded-lg max-w-md">
+                <h3 className="text-lg font-medium text-gray-900 mb-3">Редактировать список</h3>
+                {listError && <p className="text-red-600 text-sm mb-2">{listError}</p>}
+                <div className="grid gap-3">
+                  <input
+                    type="text"
+                    placeholder="Название списка"
+                    value={editListForm.name}
+                    onChange={(e) => setEditListForm((f) => ({ ...f, name: e.target.value }))}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Год (необязательно)"
+                    value={editListForm.year}
+                    onChange={(e) => setEditListForm((f) => ({ ...f, year: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                  />
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button type="submit" className="px-4 py-2 bg-accent text-white text-sm rounded hover:bg-accent-hover">
+                    Сохранить
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingList(null)}
+                    className="px-4 py-2 border border-gray-300 text-sm rounded hover:bg-gray-50"
+                  >
+                    Отмена
+                  </button>
+                </div>
+              </form>
+            )}
+
             <div className="mb-4 flex gap-2 items-center">
               <label className="text-sm text-gray-600">Фильтр по году:</label>
               <select
@@ -302,6 +388,13 @@ export default function HR() {
                       <span className="flex items-center gap-2">
                         <button
                           type="button"
+                          onClick={() => openEditList(l)}
+                          className="text-accent hover:underline text-sm"
+                        >
+                          Редактировать
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => handleCopyList(l)}
                           className="text-accent hover:underline text-sm"
                         >
@@ -330,6 +423,25 @@ export default function HR() {
 
   return (
     <div>
+      <div className="flex gap-2 mb-4 border-b border-gray-200 pb-2">
+        <NavLink
+          to="/hr"
+          end
+          className={({ isActive }) =>
+            `px-3 py-2 rounded text-sm font-medium ${isActive ? 'bg-accent text-white' : 'text-gray-600 hover:bg-gray-100'}`
+          }
+        >
+          Списки
+        </NavLink>
+        <NavLink
+          to="/hr/events"
+          className={({ isActive }) =>
+            `px-3 py-2 rounded text-sm font-medium ${isActive ? 'bg-accent text-white' : 'text-gray-600 hover:bg-gray-100'}`
+          }
+        >
+          План мероприятий
+        </NavLink>
+      </div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-semibold text-gray-900">HR — Папки</h2>
         <button

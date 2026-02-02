@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, NavLink } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -386,6 +386,25 @@ export default function HrListView() {
 
   return (
     <div>
+      <div className="flex gap-2 mb-4 border-b border-gray-200 pb-2">
+        <NavLink
+          to="/hr"
+          end
+          className={({ isActive }) =>
+            `px-3 py-2 rounded text-sm font-medium ${isActive ? 'bg-accent text-white' : 'text-gray-600 hover:bg-gray-100'}`
+          }
+        >
+          Списки
+        </NavLink>
+        <NavLink
+          to="/hr/events"
+          className={({ isActive }) =>
+            `px-3 py-2 rounded text-sm font-medium ${isActive ? 'bg-accent text-white' : 'text-gray-600 hover:bg-gray-100'}`
+          }
+        >
+          План мероприятий
+        </NavLink>
+      </div>
       <div className="mb-4">
         {list.folderId ? (
           <Link to={`/hr/folder/${list.folderId}`} className="text-accent hover:underline text-sm">&larr; Назад в папку</Link>
@@ -433,7 +452,7 @@ export default function HrListView() {
           >
             {exporting ? 'Экспорт...' : 'Экспорт Excel'}
           </button>
-          {hasPerm('hr_delete_entries') && (
+          {hasPerm('hr_delete_all_entries') && (
             <button
               type="button"
               onClick={handleDeleteAllEntries}
@@ -443,7 +462,7 @@ export default function HrListView() {
               Удалить все
             </button>
           )}
-          {(hasPerm('hr_edit_fields') || hasPerm('hr_delete_fields')) && (
+          {(hasPerm('hr_manage_fields') || hasPerm('hr_edit_fields') || hasPerm('hr_delete_fields')) && (
             <button
               type="button"
               onClick={() => setShowFieldForm(!showFieldForm)}
@@ -522,7 +541,7 @@ export default function HrListView() {
                         : (f.options as string[]).join(', ')}]
                     </span>
                   )}
-                  {hasPerm('hr_edit_fields') && (
+                  {(hasPerm('hr_manage_fields') || hasPerm('hr_edit_fields')) && (
                     <button
                       type="button"
                       onClick={() => startEditingField(f)}
@@ -531,7 +550,7 @@ export default function HrListView() {
                       Редактировать
                     </button>
                   )}
-                  {hasPerm('hr_delete_fields') && (
+                  {(hasPerm('hr_manage_fields') || hasPerm('hr_delete_fields')) && (
                     <button
                       type="button"
                       onClick={() => handleDeleteField(f.id)}
@@ -705,7 +724,7 @@ export default function HrListView() {
                 ))}
               </div>
             )}
-            {hasPerm('hr_edit_fields') && (
+            {(hasPerm('hr_manage_fields') || hasPerm('hr_edit_fields')) && (
               <button type="submit" className="px-3 py-1.5 bg-accent text-white text-sm rounded hover:bg-accent-hover">
                 Добавить поле
               </button>

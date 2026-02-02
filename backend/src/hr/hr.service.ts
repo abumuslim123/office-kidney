@@ -6,6 +6,7 @@ import { HrFolder } from './entities/hr-folder.entity';
 import { HrList } from './entities/hr-list.entity';
 import { HrFieldDefinition } from './entities/hr-field-definition.entity';
 import { HrEntry } from './entities/hr-entry.entity';
+import { HrEvent } from './entities/hr-event.entity';
 import { CreateFolderDto } from './dto/create-folder.dto';
 import { UpdateFolderDto } from './dto/update-folder.dto';
 import { CreateListDto } from './dto/create-list.dto';
@@ -14,6 +15,8 @@ import { CreateFieldDto } from './dto/create-field.dto';
 import { UpdateFieldDto } from './dto/update-field.dto';
 import { CreateEntryDto } from './dto/create-entry.dto';
 import { UpdateEntryDto } from './dto/update-entry.dto';
+import { CreateEventDto } from './dto/create-event.dto';
+import { UpdateEventDto } from './dto/update-event.dto';
 
 @Injectable()
 export class HrService {
@@ -26,6 +29,8 @@ export class HrService {
     private fieldRepo: Repository<HrFieldDefinition>,
     @InjectRepository(HrEntry)
     private entryRepo: Repository<HrEntry>,
+    @InjectRepository(HrEvent)
+    private eventRepo: Repository<HrEvent>,
   ) {}
 
   // ========== Folders ==========
@@ -318,6 +323,46 @@ export class HrService {
     await this.findListById(listId); // ensure list exists
     const result = await this.entryRepo.delete({ listId });
     return { deleted: result.affected ?? 0 };
+  }
+
+  // ========== Events ==========
+
+  async findEventsByDateRange(startDate: string, endDate: string): Promise<HrEvent[]> {
+    return this.eventRepo
+      .createQueryBuilder('e')
+      .where('e.date >= :startDate', { startDate })
+      .andWhere('e.date <= :endDate', { endDate })
+      .orderBy('e.date', 'ASC')
+      .addOrderBy('e.createdAt', 'ASC')
+      .getMany();
+  }
+
+  async findEventById(id: string): Promise<HrEvent> {
+    const event = await this.eventRepo.findOne({ where: { id } });
+    if (!event) throw new NotFoundException('Event not found');
+    return event;
+  }
+
+  async createEvent(dto: CreateEventDto): Promise<HrEvent> {
+    const event = this.eventRepo.create({
+      title: dto.title,
+      date: dto.date,
+      description: dto.description ?? null,
+    });
+    return this.eventRepo.save(event);
+  }
+
+  async updateEvent(id: string, dto: UpdateEventDto): Promise<HrEvent> {
+    const event = await this.findEventById(id);
+    if (dto.title !== undefined) event.title = dto.title;
+    if (dto.date !== undefined) event.date = dto.date;
+    if (dto.description !== undefined) event.description = dto.description;
+    return this.eventRepo.save(event);
+  }
+
+  async deleteEvent(id: string): Promise<void> {
+    const event = await this.findEventById(id);
+    await this.eventRepo.remove(event);
   }
 
   // ========== Export ==========
