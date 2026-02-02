@@ -12,7 +12,12 @@ export class AuthController {
 
   @Post('login')
   async login(@Body() dto: LoginDto) {
-    return this.auth.login(dto);
+    try {
+      return await this.auth.login(dto);
+    } catch (e) {
+      console.error('auth/login error:', e);
+      throw e;
+    }
   }
 
   @Post('refresh')

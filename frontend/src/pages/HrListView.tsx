@@ -14,6 +14,7 @@ type FieldDef = {
 
 type HrList = {
   id: string;
+  folderId?: string;
   name: string;
   year: number | null;
   fields: FieldDef[];
@@ -35,12 +36,16 @@ export default function HrListView() {
   const [showFieldForm, setShowFieldForm] = useState(false);
   const [fieldForm, setFieldForm] = useState({ name: '', fieldType: 'text' as FieldDef['fieldType'], options: '' });
   const [statusOptions, setStatusOptions] = useState<StatusOption[]>([]);
+  const [editingField, setEditingField] = useState<FieldDef | null>(null);
+  const [editFieldForm, setEditFieldForm] = useState({ name: '', fieldType: 'text' as FieldDef['fieldType'], options: '' });
+  const [editStatusOptions, setEditStatusOptions] = useState<StatusOption[]>([]);
   const [showEntryForm, setShowEntryForm] = useState(false);
   const [entryData, setEntryData] = useState<Record<string, string>>({});
   const [editingEntry, setEditingEntry] = useState<HrEntry | null>(null);
 
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<Record<string, string>>({});
+  const [showFilters, setShowFilters] = useState(false);
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -147,6 +152,55 @@ export default function HrListView() {
       await api.put(`/hr/fields/${other.id}`, { order: fields[idx].order });
       load();
     } catch {}
+  };
+
+  const startEditingField = (f: FieldDef) => {
+    setEditingField(f);
+    setEditFieldForm({
+      name: f.name,
+      fieldType: f.fieldType,
+      options: f.fieldType === 'select' && Array.isArray(f.options) && f.options.length > 0 && typeof f.options[0] === 'string'
+        ? (f.options as string[]).join(', ')
+        : '',
+    });
+    setEditStatusOptions(
+      f.fieldType === 'status' && Array.isArray(f.options) && f.options.length > 0 && typeof f.options[0] === 'object'
+        ? (f.options as StatusOption[]).map((o) => ({ label: o.label, color: o.color }))
+        : [],
+    );
+  };
+
+  const addEditStatusOption = () => setEditStatusOptions((prev) => [...prev, { label: '', color: '#6b7280' }]);
+  const updateEditStatusOption = (i: number, key: 'label' | 'color', value: string) => {
+    setEditStatusOptions((prev) => prev.map((o, j) => (j === i ? { ...o, [key]: value } : o)));
+  };
+  const removeEditStatusOption = (i: number) => setEditStatusOptions((prev) => prev.filter((_, j) => j !== i));
+
+  const handleUpdateField = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingField) return;
+    setError('');
+    try {
+      const options =
+        editFieldForm.fieldType === 'select' && editFieldForm.options
+          ? editFieldForm.options.split(',').map((s) => s.trim()).filter(Boolean)
+          : editFieldForm.fieldType === 'status' && editStatusOptions.length > 0
+            ? editStatusOptions
+            : undefined;
+      await api.put(`/hr/fields/${editingField.id}`, {
+        name: editFieldForm.name,
+        fieldType: editFieldForm.fieldType,
+        ...(options !== undefined && { options }),
+      });
+      setEditingField(null);
+      load();
+    } catch (err: unknown) {
+      const data = err && typeof err === 'object' && 'response' in err
+        ? (err as { response?: { data?: { message?: string | string[] } } }).response?.data
+        : null;
+      const msg = data?.message;
+      setError(Array.isArray(msg) ? msg.join(', ') : (msg as string) || 'Ошибка');
+    }
   };
 
   const formatDate = (value: unknown): string => {
@@ -330,7 +384,11 @@ export default function HrListView() {
   return (
     <div>
       <div className="mb-4">
-        <Link to="/hr" className="text-accent hover:underline text-sm">&larr; Назад к спискам</Link>
+        {list.folderId ? (
+          <Link to={`/hr/folder/${list.folderId}`} className="text-accent hover:underline text-sm">&larr; Назад в папку</Link>
+        ) : (
+          <Link to="/hr" className="text-accent hover:underline text-sm">&larr; Назад к спискам</Link>
+        )}
       </div>
 
       <div className="flex items-center justify-between mb-6">
@@ -455,6 +513,13 @@ export default function HrListView() {
                   )}
                   <button
                     type="button"
+                    onClick={() => startEditingField(f)}
+                    className="text-accent hover:underline text-sm"
+                  >
+                    Редактировать
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => handleDeleteField(f.id)}
                     className="text-red-600 hover:underline ml-auto"
                   >
@@ -464,6 +529,98 @@ export default function HrListView() {
               ))}
             </div>
           )}
+
+          {/* Edit field form */}
+          {editingField && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <h4 className="font-medium text-gray-800 mb-2">Редактировать поле</h4>
+              <form onSubmit={handleUpdateField} className="flex flex-col gap-3">
+                <div className="flex gap-2 items-end flex-wrap">
+                  <div>
+                    <label className="text-xs text-gray-600">Название</label>
+                    <input
+                      type="text"
+                      value={editFieldForm.name}
+                      onChange={(e) => setEditFieldForm((f) => ({ ...f, name: e.target.value }))}
+                      required
+                      className="w-40 px-2 py-1 border border-gray-300 rounded text-sm ml-1"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-600">Тип</label>
+                    <select
+                      value={editFieldForm.fieldType}
+                      onChange={(e) => setEditFieldForm((f) => ({ ...f, fieldType: e.target.value as FieldDef['fieldType'] }))}
+                      className="px-2 py-1 border border-gray-300 rounded text-sm ml-1"
+                    >
+                      <option value="text">Текст</option>
+                      <option value="textarea">Текст (многострочный)</option>
+                      <option value="date">Дата</option>
+                      <option value="phone">Телефон</option>
+                      <option value="select">Выбор</option>
+                      <option value="status">Статус</option>
+                    </select>
+                  </div>
+                  {editFieldForm.fieldType === 'select' && (
+                    <div>
+                      <label className="text-xs text-gray-600">Варианты (через запятую)</label>
+                      <input
+                        type="text"
+                        value={editFieldForm.options}
+                        onChange={(e) => setEditFieldForm((f) => ({ ...f, options: e.target.value }))}
+                        placeholder="Да, Нет"
+                        className="w-48 px-2 py-1 border border-gray-300 rounded text-sm ml-1"
+                      />
+                    </div>
+                  )}
+                </div>
+                {editFieldForm.fieldType === 'status' && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-600">Варианты статуса (название + цвет)</span>
+                      <button type="button" onClick={addEditStatusOption} className="text-accent hover:underline text-sm">
+                        + Добавить
+                      </button>
+                    </div>
+                    {editStatusOptions.map((opt, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={opt.label}
+                          onChange={(e) => updateEditStatusOption(i, 'label', e.target.value)}
+                          placeholder="Название"
+                          className="w-32 px-2 py-1 border border-gray-300 rounded text-sm"
+                        />
+                        <input
+                          type="color"
+                          value={opt.color}
+                          onChange={(e) => updateEditStatusOption(i, 'color', e.target.value)}
+                          className="w-8 h-8 rounded border border-gray-300 cursor-pointer"
+                          title="Цвет"
+                        />
+                        <button type="button" onClick={() => removeEditStatusOption(i)} className="text-red-600 hover:underline text-sm">
+                          Удалить
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <button type="submit" className="px-3 py-1.5 bg-accent text-white text-sm rounded hover:bg-accent-hover">
+                    Сохранить
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingField(null)}
+                    className="px-3 py-1.5 border border-gray-300 text-sm rounded hover:bg-gray-50"
+                  >
+                    Отмена
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
           <form onSubmit={handleAddField} className="flex gap-2 items-end flex-wrap">
             <div>
               <label className="text-xs text-gray-600">Название</label>
@@ -627,7 +784,7 @@ export default function HrListView() {
       )}
 
       {/* Search */}
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <input
           type="text"
           placeholder="Поиск..."
@@ -635,10 +792,22 @@ export default function HrListView() {
           onChange={(e) => setSearch(e.target.value)}
           className="w-full max-w-xs px-3 py-2 border border-gray-300 rounded text-sm"
         />
+        {fields.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowFilters((v) => !v)}
+            className="px-3 py-2 border border-gray-300 text-sm rounded hover:bg-gray-50"
+          >
+            Фильтры
+            {(Object.keys(filters).some((k) => filters[k]?.trim()) || search) && (
+              <span className="ml-1 text-accent">•</span>
+            )}
+          </button>
+        )}
       </div>
 
       {/* Filters by fields */}
-      {fields.length > 0 && (
+      {fields.length > 0 && showFilters && (
         <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
           <div className="flex items-center gap-2 mb-2">
             <span className="text-sm font-medium text-gray-700">Фильтры по полям</span>

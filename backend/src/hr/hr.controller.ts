@@ -20,6 +20,8 @@ import { HrService } from './hr.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
+import { CreateFolderDto } from './dto/create-folder.dto';
+import { UpdateFolderDto } from './dto/update-folder.dto';
 import { CreateListDto } from './dto/create-list.dto';
 import { UpdateListDto } from './dto/update-list.dto';
 import { CreateFieldDto } from './dto/create-field.dto';
@@ -33,23 +35,54 @@ import { UpdateEntryDto } from './dto/update-entry.dto';
 export class HrController {
   constructor(private hr: HrService) {}
 
+  // ========== Folders ==========
+
+  @Get('folders')
+  findAllFolders() {
+    return this.hr.findAllFolders();
+  }
+
+  @Get('folders/:id')
+  findFolder(@Param('id') id: string) {
+    return this.hr.findFolderById(id);
+  }
+
+  @Post('folders')
+  createFolder(@Body() dto: CreateFolderDto) {
+    return this.hr.createFolder(dto);
+  }
+
+  @Put('folders/:id')
+  updateFolder(@Param('id') id: string, @Body() dto: UpdateFolderDto) {
+    return this.hr.updateFolder(id, dto);
+  }
+
+  @Delete('folders/:id')
+  async deleteFolder(@Param('id') id: string) {
+    await this.hr.deleteFolder(id);
+    return { success: true };
+  }
+
   // ========== Lists ==========
 
   @Get('lists')
-  findAllLists(@Query('year') year?: string) {
-    return this.hr.findAllLists(year ? parseInt(year, 10) : undefined);
+  findAllLists(@Query('folderId') folderId?: string, @Query('year') year?: string) {
+    return this.hr.findAllLists(folderId || undefined, year ? parseInt(year, 10) : undefined);
   }
 
   @Post('lists/import')
   @UseInterceptors(FileInterceptor('file', { storage: multer.memoryStorage() }))
   async createListFromFile(
     @UploadedFile() file: Express.Multer.File,
+    @Query('folderId') folderId?: string,
     @Query('name') name?: string,
     @Query('year') year?: string,
   ) {
     if (!file?.buffer) throw new BadRequestException('Файл не загружен');
+    if (!folderId) throw new BadRequestException('folderId обязателен');
     return this.hr.createListFromFile(
       file.buffer,
+      folderId,
       name || undefined,
       year ? parseInt(year, 10) : undefined,
     );

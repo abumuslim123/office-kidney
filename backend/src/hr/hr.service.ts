@@ -2,9 +2,12 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, ILike } from 'typeorm';
 import * as ExcelJS from 'exceljs';
+import { HrFolder } from './entities/hr-folder.entity';
 import { HrList } from './entities/hr-list.entity';
 import { HrFieldDefinition } from './entities/hr-field-definition.entity';
 import { HrEntry } from './entities/hr-entry.entity';
+import { CreateFolderDto } from './dto/create-folder.dto';
+import { UpdateFolderDto } from './dto/update-folder.dto';
 import { CreateListDto } from './dto/create-list.dto';
 import { UpdateListDto } from './dto/update-list.dto';
 import { CreateFieldDto } from './dto/create-field.dto';
@@ -15,6 +18,8 @@ import { UpdateEntryDto } from './dto/update-entry.dto';
 @Injectable()
 export class HrService {
   constructor(
+    @InjectRepository(HrFolder)
+    private folderRepo: Repository<HrFolder>,
     @InjectRepository(HrList)
     private listRepo: Repository<HrList>,
     @InjectRepository(HrFieldDefinition)
@@ -23,10 +28,46 @@ export class HrService {
     private entryRepo: Repository<HrEntry>,
   ) {}
 
+  // ========== Folders ==========
+
+  async findAllFolders(): Promise<HrFolder[]> {
+    return this.folderRepo.find({
+      relations: ['lists'],
+      order: { name: 'ASC' },
+    });
+  }
+
+  async findFolderById(id: string): Promise<HrFolder> {
+    const folder = await this.folderRepo.findOne({
+      where: { id },
+      relations: ['lists'],
+    });
+    if (!folder) throw new NotFoundException('Folder not found');
+    return folder;
+  }
+
+  async createFolder(dto: CreateFolderDto): Promise<HrFolder> {
+    const folder = this.folderRepo.create({ name: dto.name });
+    return this.folderRepo.save(folder);
+  }
+
+  async updateFolder(id: string, dto: UpdateFolderDto): Promise<HrFolder> {
+    const folder = await this.findFolderById(id);
+    if (dto.name !== undefined) folder.name = dto.name;
+    return this.folderRepo.save(folder);
+  }
+
+  async deleteFolder(id: string): Promise<void> {
+    const folder = await this.findFolderById(id);
+    await this.folderRepo.remove(folder);
+  }
+
   // ========== Lists ==========
 
-  async findAllLists(year?: number): Promise<HrList[]> {
-    const where = year ? { year } : {};
+  async findAllLists(folderId?: string, year?: number): Promise<HrList[]> {
+    const where: { folderId?: string; year?: number } = {};
+    if (folderId) where.folderId = folderId;
+    if (year !== undefined) where.year = year;
     return this.listRepo.find({
       where,
       order: { year: 'DESC', name: 'ASC' },
@@ -43,7 +84,9 @@ export class HrService {
   }
 
   async createList(dto: CreateListDto): Promise<HrList> {
+    await this.findFolderById(dto.folderId);
     const list = this.listRepo.create({
+      folderId: dto.folderId,
       name: dto.name,
       year: dto.year ?? null,
     });
@@ -64,6 +107,7 @@ export class HrService {
 
   async createListFromFile(
     fileBuffer: Buffer,
+    folderId: string,
     name?: string,
     year?: number,
   ): Promise<HrList> {
@@ -82,7 +126,7 @@ export class HrService {
     if (headers.length === 0) throw new NotFoundException('Первая строка должна содержать заголовки колонок');
 
     const listName = name || `Импорт ${new Date().toISOString().slice(0, 10)}`;
-    const list = await this.createList({ name: listName, year: year });
+    const list = await this.createList({ folderId, name: listName, year: year ?? undefined });
 
     for (let i = 0; i < headers.length; i++) {
       await this.createField(list.id, {

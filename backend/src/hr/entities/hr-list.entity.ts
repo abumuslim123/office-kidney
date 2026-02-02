@@ -5,7 +5,10 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToMany,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
+import { HrFolder } from './hr-folder.entity';
 import { HrFieldDefinition } from './hr-field-definition.entity';
 import { HrEntry } from './hr-entry.entity';
 
@@ -13,6 +16,13 @@ import { HrEntry } from './hr-entry.entity';
 export class HrList {
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  @Column({ type: 'uuid' })
+  folderId: string;
+
+  @ManyToOne(() => HrFolder, (f) => f.lists, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'folderId' })
+  folder: HrFolder;
 
   @Column({ length: 200 })
   name: string;
