@@ -29,4 +29,14 @@ export class ScreensPublicController {
     res.setHeader('Content-Type', 'video/mp4');
     stream.pipe(res);
   }
+
+  @Get('apk')
+  async downloadApk(@Res() res: Response) {
+    const filePath = await this.screens.getApkPath();
+    if (!filePath) throw new NotFoundException('APK file not configured or not found');
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    res.setHeader('Content-Disposition', 'attachment; filename="kidney-office-tv.apk"');
+    const stream = createReadStream(filePath);
+    stream.pipe(res);
+  }
 }

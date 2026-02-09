@@ -50,26 +50,54 @@ npm run build
 
 ---
 
-## 3. Как получить APK (приложение для телевизора)
+## 3. Приложение для ТВ (APK)
 
-**Сейчас готового APK в проекте нет.** Сделаны только:
+В репозитории есть проект **`tv-app/`** (Kotlin, Android). При первом запуске на ТВ приложение само регистрирует устройство в «Настройке экранов», держит экран включённым и воспроизводит загруженное видео в цикле.
 
-- backend API (в т.ч. публичные эндпоинты для ТВ),
-- веб-страница «Настройка экранов»,
-- документация API: [docs/screens-api.md](screens-api.md).
+### Сборка APK
 
-Чтобы получить APK, нужно отдельно разработать приложение для Android TV, которое:
+**Вариант 1: через Docker (без установки Android SDK и JDK)**
 
-1. При первом запуске генерирует или сохраняет `deviceId` и вызывает `POST /api/public/screens/register`.
-2. Периодически запрашивает `GET /api/public/screens/feed/:deviceId`.
-3. Если в ответе есть `videoUrl` — воспроизводит по этому URL видео (например через ExoPlayer).
+Из корня репозитория:
 
-Варианты:
+```bash
+cd tv-app
+docker build -f Dockerfile.build -t kidney-tv-build .
+docker run --rm -u root -v "$(pwd)":/project -w /project kidney-tv-build ./gradlew assembleRelease --no-daemon
+docker run --rm -u root -v "$(pwd)":/project -w /project -v "$(pwd)/../backend/apk":/out kidney-tv-build sh -c '
+  keytool -genkeypair -v -keystore /tmp/release.keystore -alias release -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Kidney Office TV"
+  /opt/android-sdk/build-tools/34.0.0/apksigner sign --ks /tmp/release.keystore --ks-pass pass:android --key-pass pass:android --out /out/kidney-office-tv.apk app/build/outputs/apk/release/app-release-unsigned.apk
+'
+```
 
-- **Заказать/сделать приложение сами** — по описанию в [docs/screens-api.md](screens-api.md). Подойдёт Android Studio, Kotlin/Java, минимум один экран + сетевые вызовы + ExoPlayer.
-- **Добавить заготовку в этот репозиторий** — можно позже создать папку `tv-app/` с минимальным Android TV-проектом (Kotlin, один экран, register + feed + воспроизведение). Тогда APK собирается так: открыть `tv-app` в Android Studio и собрать signed bundle (AAB) или APK.
+Подписанный APK окажется в `backend/apk/kidney-office-tv.apk`. Задайте backend’у `SCREENS_APK_PATH=apk/kidney-office-tv.apk` (при запуске из каталога `backend/`).
 
-Итог: пересобрать backend и frontend нужно; APK нужно либо разработать по документации, либо добавить в репо заготовку и собрать её.
+**Вариант 2: локально (Android SDK и JDK 17)**
+
+1. Откройте папку `tv-app` в Android Studio или выполните: `cd tv-app && ./gradlew assembleRelease`.
+2. Неподписанный APK: `tv-app/app/build/outputs/apk/release/app-release-unsigned.apk`.
+3. Подпишите (Android Studio: **Build → Generate Signed Bundle / APK** или `apksigner` из build-tools).
+4. Положите подписанный файл, например, в `backend/apk/kidney-office-tv.apk`.
+
+### Размещение APK для скачивания со страницы «Настройка экранов»
+
+На странице «Настройка экранов» есть кнопка **«Скачать приложение для ТВ (APK)»**. Файл отдаётся backend’ом, если задана переменная окружения **`SCREENS_APK_PATH`**:
+
+- Укажите полный или относительный путь к подписанному APK (например `./kidney-office-tv.apk` или `/opt/kidney-office/apk/kidney-office-tv.apk`).
+- Положите собранный и подписанный `kidney-office-tv.apk` по этому пути.
+- Перезапустите backend (или задайте `SCREENS_APK_PATH` при старте).
+
+Если `SCREENS_APK_PATH` не задан или файл по пути отсутствует, по кнопке скачивания будет 404.
+
+**Docker:** при деплое можно монтировать volume с каталогом, где лежит APK, и задать `SCREENS_APK_PATH` в `environment` в `docker-compose` (путь внутри контейнера к смонтированному файлу).
+
+### Другой URL API в приложении
+
+По умолчанию в приложении вшит production URL: `https://kidney-office.srvu.ru/api`. Чтобы собрать APK для другого сервера, при сборке задайте свойство:
+
+```bash
+./gradlew assembleRelease -PAPI_BASE_URL=https://your-server.com/api
+```
 
 ---
 
@@ -79,6 +107,7 @@ npm run build
 
 - **`SCREENS_VIDEO_DIR`** — каталог для сохранения загруженных видео (по умолчанию `uploads/screens` относительно рабочей директории).
 - **`API_BASE_URL`** — полный URL API (например `https://kidney-office.srvu.ru/api`), чтобы в ответе feed для ТВ приходила абсолютная ссылка на видео. Если не задан, в feed будет относительный путь (подходит, если ТВ обращается к тому же хосту).
+- **`SCREENS_APK_PATH`** — путь к файлу APK для раздачи на странице «Настройка экранов» (см. выше). Если не задан, кнопка «Скачать приложение для ТВ» вернёт 404.
 
 ---
 
@@ -87,4 +116,4 @@ npm run build
 - [ ] Пересобрать и перезапустить backend (и при необходимости frontend).
 - [ ] Зайти в веб-интерфейс и убедиться, что в меню есть «Настройка экранов».
 - [ ] При необходимости выдать право «Настройка экранов» пользователям в разделе «Пользователи».
-- [ ] Решить, как делать APK: по документации отдельно или добавить заготовку в репозиторий и собрать в Android Studio.
+- [ ] Собрать и подписать APK из `tv-app/`, положить по пути из `SCREENS_APK_PATH` и перезапустить backend, чтобы кнопка «Скачать приложение для ТВ» работала.

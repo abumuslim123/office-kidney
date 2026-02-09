@@ -104,6 +104,16 @@ export default function Screens() {
         Установите приложение на телевизор и запустите его. После первого запроса телевизор появится в списке ниже. Загрузите видео для экрана — оно будет автоматически воспроизводиться в приложении на ТВ.
       </div>
 
+      <div className="mb-4">
+        <a
+          href="/api/public/screens/apk"
+          download="kidney-office-tv.apk"
+          className="inline-block px-4 py-2 bg-accent text-white rounded text-sm font-medium hover:opacity-90"
+        >
+          Скачать приложение для ТВ (APK)
+        </a>
+      </div>
+
       {uploadError && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
           {uploadError}

@@ -11,6 +11,7 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import * as multer from 'multer';
@@ -32,6 +33,16 @@ export class ScreensController {
     return this.screens.findAll();
   }
 
+  @Get('apk')
+  async downloadApk(@Res() res: Response) {
+    const filePath = await this.screens.getApkPath();
+    if (!filePath) throw new NotFoundException('APK file not configured or not found');
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    res.setHeader('Content-Disposition', 'attachment; filename="kidney-office-tv.apk"');
+    const stream = createReadStream(filePath);
+    stream.pipe(res);
+  }
+
   @Get(':id')
   getOne(@Param('id') id: string) {
     return this.screens.findOne(id);
@@ -43,7 +54,12 @@ export class ScreensController {
   }
 
   @Post(':id/video')
-  @UseInterceptors(FileInterceptor('file', { storage: multer.memoryStorage() }))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: multer.memoryStorage(),
+      limits: { fileSize: 512 * 1024 * 1024 }, // 512 MB
+    }),
+  )
   async uploadVideo(
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,

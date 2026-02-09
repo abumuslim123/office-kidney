@@ -1,0 +1,26 @@
+# Build Android TV APK with JDK 17 (AGP 8.2 requires JDK 17, not 22)
+FROM eclipse-temurin:17-jdk-jammy
+
+ENV ANDROID_HOME=/opt/android-sdk
+ENV PATH="${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:${PATH}"
+
+RUN apt-get update -qq && apt-get install -y -qq unzip wget && rm -rf /var/lib/apt/lists/*
+
+# Android command-line tools (Linux, from developer.android.com)
+RUN mkdir -p ${ANDROID_HOME}/cmdline-tools && \
+    wget -q https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip -O /tmp/cmdline-tools.zip && \
+    unzip -q /tmp/cmdline-tools.zip -d /tmp && \
+    mv /tmp/cmdline-tools ${ANDROID_HOME}/cmdline-tools/latest && \
+    rm /tmp/cmdline-tools.zip
+
+# Install platform and build-tools
+RUN yes | sdkmanager --sdk_root=${ANDROID_HOME} \
+    "platform-tools" \
+    "platforms;android-34" \
+    "build-tools;34.0.0"
+
+# Accept licenses (required for headless)
+RUN yes | sdkmanager --sdk_root=${ANDROID_HOME} --licenses 2>/dev/null || true
+
+WORKDIR /project
+# Build is run with: docker run -v $(pwd):/project -w /project <image> ./gradlew assembleRelease --no-daemon

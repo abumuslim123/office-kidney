@@ -92,8 +92,21 @@ export class ScreensService {
   async getFeed(deviceId: string): Promise<{ videoUrl: string | null }> {
     const screen = await this.repo.findOne({ where: { deviceId } });
     if (!screen || !screen.currentVideoPath) return { videoUrl: null };
-    const baseUrl = this.config.get<string>('API_BASE_URL') || '';
-    const videoUrl = `${baseUrl}/api/public/screens/video/${screen.id}`;
+    const base = (this.config.get<string>('API_BASE_URL') || '').trim().replace(/\/+$/, '');
+    const path = `/api/public/screens/video/${screen.id}`;
+    const videoUrl = base ? `${base}${path}` : path;
     return { videoUrl };
+  }
+
+  async getApkPath(): Promise<string | null> {
+    const raw = this.config.get<string>('SCREENS_APK_PATH');
+    if (!raw?.trim()) return null;
+    const fullPath = path.isAbsolute(raw) ? raw : path.join(process.cwd(), raw);
+    try {
+      await fs.access(fullPath);
+      return fullPath;
+    } catch {
+      return null;
+    }
   }
 }
