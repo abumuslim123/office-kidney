@@ -10,8 +10,8 @@ android {
         applicationId = "ru.kidneyoffice.tv"
         minSdk = 21
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 5
+        versionName = "1.4"
         val apiBaseUrl = project.findProperty("API_BASE_URL") as String? ?: "https://kidney-office.srvu.ru/api"
         buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
     }

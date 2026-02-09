@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { Screen } from './entities/screen.entity';
+import { ScreenPhoto } from './entities/screen-photo.entity';
 
 @Injectable()
 export class ScreensService {
@@ -13,6 +14,8 @@ export class ScreensService {
   constructor(
     @InjectRepository(Screen)
     private repo: Repository<Screen>,
+    @InjectRepository(ScreenPhoto)
+    private photoRepo: Repository<ScreenPhoto>,
     private config: ConfigService,
   ) {
     const base = this.config.get<string>('SCREENS_VIDEO_DIR') || path.join(process.cwd(), 'uploads', 'screens');
@@ -49,6 +52,94 @@ export class ScreensService {
     }
   }
 
+  private getPhotosDir(screenId: string): string {
+    return path.join(this.videoDir, screenId, 'photos');
+  }
+
+  private normalizeRotation(value: number): number {
+    const allowed = new Set([0, 90, 180, 270]);
+    return allowed.has(value) ? value : 0;
+  }
+
+  async listPhotos(screenId: string): Promise<ScreenPhoto[]> {
+    return this.photoRepo.find({
+      where: { screenId },
+      order: { orderIndex: 'ASC', createdAt: 'ASC' },
+    });
+  }
+
+  async listActivePhotos(screenId: string): Promise<ScreenPhoto[]> {
+    const now = new Date();
+    const photos = await this.listPhotos(screenId);
+    return photos.filter((p) => !p.expiresAt || p.expiresAt > now);
+  }
+
+  async savePhoto(
+    screenId: string,
+    buffer: Buffer,
+    originalName: string,
+    durationSeconds: number,
+    rotation: number,
+    expiresAt: Date | null,
+    orderIndex: number,
+  ): Promise<ScreenPhoto> {
+    await this.findOne(screenId);
+    const ext = path.extname(originalName) || '.jpg';
+    const safeExt = /^\.\w+$/.test(ext) ? ext : '.jpg';
+    const dir = this.getPhotosDir(screenId);
+    await fs.mkdir(dir, { recursive: true });
+    const fileName = `photo-${Date.now()}${safeExt}`;
+    const fullPath = path.join(dir, fileName);
+    await fs.writeFile(fullPath, buffer);
+    const relativePath = `${screenId}/photos/${fileName}`;
+    const photo = this.photoRepo.create({
+      screenId,
+      imagePath: relativePath,
+      durationSeconds: Math.max(1, Math.min(durationSeconds || 15, 3600)),
+      rotation: this.normalizeRotation(rotation),
+      expiresAt,
+      orderIndex: Math.max(0, orderIndex || 0),
+    });
+    return this.photoRepo.save(photo);
+  }
+
+  async updatePhoto(
+    photoId: string,
+    data: { durationSeconds?: number; rotation?: number; expiresAt?: Date | null; orderIndex?: number },
+  ): Promise<ScreenPhoto> {
+    const photo = await this.photoRepo.findOne({ where: { id: photoId } });
+    if (!photo) throw new NotFoundException('Photo not found');
+    if (data.durationSeconds != null) photo.durationSeconds = Math.max(1, Math.min(data.durationSeconds, 3600));
+    if (data.rotation != null) photo.rotation = this.normalizeRotation(data.rotation);
+    if (data.expiresAt !== undefined) photo.expiresAt = data.expiresAt;
+    if (data.orderIndex != null) photo.orderIndex = Math.max(0, data.orderIndex);
+    return this.photoRepo.save(photo);
+  }
+
+  async deletePhoto(photoId: string): Promise<void> {
+    const photo = await this.photoRepo.findOne({ where: { id: photoId } });
+    if (!photo) throw new NotFoundException('Photo not found');
+    const fullPath = path.join(this.videoDir, photo.imagePath);
+    try {
+      await fs.rm(fullPath);
+    } catch {
+      // ignore if file missing
+    }
+    await this.photoRepo.remove(photo);
+  }
+
+  async getPhotoPath(photoId: string): Promise<string | null> {
+    const photo = await this.photoRepo.findOne({ where: { id: photoId } });
+    if (!photo) return null;
+    const fullPath = path.join(this.videoDir, photo.imagePath);
+    try {
+      await fs.access(fullPath);
+      return fullPath;
+    } catch {
+      return null;
+    }
+  }
+
   async saveVideo(screenId: string, buffer: Buffer, originalName: string): Promise<Screen> {
     const screen = await this.findOne(screenId);
     const ext = path.extname(originalName) || '.mp4';
@@ -63,8 +154,25 @@ export class ScreensService {
     return this.repo.save(screen);
   }
 
+  async deleteVideo(screenId: string): Promise<void> {
+    const screen = await this.findOne(screenId);
+    if (!screen.currentVideoPath) return;
+    const stored = screen.currentVideoPath;
+    if (stored.startsWith(screenId + path.sep) || stored.startsWith(screenId + '/')) {
+      const fullPath = path.join(this.videoDir, stored);
+      try {
+        await fs.rm(fullPath);
+      } catch {
+        // ignore if file missing
+      }
+    }
+    screen.currentVideoPath = null;
+    await this.repo.save(screen);
+  }
+
   async delete(id: string): Promise<void> {
     const screen = await this.findOne(id);
+    await this.photoRepo.delete({ screenId: screen.id });
     const dir = path.join(this.videoDir, screen.id);
     try {
       await fs.rm(dir, { recursive: true });
@@ -89,13 +197,27 @@ export class ScreensService {
     return this.repo.save(screen);
   }
 
-  async getFeed(deviceId: string): Promise<{ videoUrl: string | null }> {
+  async getFeed(
+    deviceId: string,
+  ): Promise<{ videoUrl: string | null; photos?: { url: string; durationSeconds: number; rotation: number }[] }> {
     const screen = await this.repo.findOne({ where: { deviceId } });
-    if (!screen || !screen.currentVideoPath) return { videoUrl: null };
+    if (!screen) return { videoUrl: null };
     const base = (this.config.get<string>('API_BASE_URL') || '').trim().replace(/\/+$/, '');
-    const path = `/api/public/screens/video/${screen.id}`;
-    const videoUrl = base ? `${base}${path}` : path;
-    return { videoUrl };
+    if (screen.currentVideoPath) {
+      const path = `/api/public/screens/video/${screen.id}`;
+      const videoUrl = base ? `${base}${path}` : path;
+      return { videoUrl };
+    }
+    const photos = await this.listActivePhotos(screen.id);
+    const items = photos.map((p) => {
+      const path = `/api/public/screens/photo/${p.id}`;
+      return {
+        url: base ? `${base}${path}` : path,
+        durationSeconds: p.durationSeconds,
+        rotation: p.rotation,
+      };
+    });
+    return { videoUrl: null, photos: items };
   }
 
   async getApkPath(): Promise<string | null> {
