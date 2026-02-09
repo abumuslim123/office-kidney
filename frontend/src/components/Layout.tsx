@@ -14,6 +14,7 @@ const nav: NavItem[] = [
   { to: '/services', label: 'Сервисы', permissions: ['services'] },
   { to: '/hr', label: 'HR', permissions: ['hr'] },
   { to: '/users', label: 'Пользователи', permissions: ['users'] },
+  { to: '/screens', label: 'Настройка экранов', permissions: ['screens'] },
 ];
 
 export default function Layout() {

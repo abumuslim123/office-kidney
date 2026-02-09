@@ -12,6 +12,7 @@ import HrListView from './pages/HrListView';
 import HrEvents from './pages/HrEvents';
 import HrEventsPublic from './pages/HrEventsPublic';
 import HrListsPublic from './pages/HrListsPublic';
+import Screens from './pages/Screens';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -40,6 +41,7 @@ function App() {
       >
         <Route index element={<Dashboard />} />
         <Route path="users" element={<ProtectedRoute permissions={['users']}><Users /></ProtectedRoute>} />
+        <Route path="screens" element={<ProtectedRoute permissions={['screens']}><Screens /></ProtectedRoute>} />
         <Route path="accounting" element={<ProtectedRoute permissions={['accounting']}><Accounting /></ProtectedRoute>} />
         <Route path="agents" element={<ProtectedRoute permissions={['agents']}><Agents /></ProtectedRoute>} />
         <Route path="services" element={<ProtectedRoute permissions={['services']}><Services /></ProtectedRoute>} />

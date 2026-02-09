@@ -151,6 +151,7 @@ export class UsersService {
       { slug: 'services', name: 'Сервисы' },
       { slug: 'hr', name: 'HR' },
       { slug: 'users', name: 'Пользователи' },
+      { slug: 'screens', name: 'Настройка экранов' },
     ]);
   }
 }

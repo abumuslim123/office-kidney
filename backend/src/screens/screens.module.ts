@@ -1,0 +1,19 @@
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { MulterModule } from '@nestjs/platform-express';
+import * as multer from 'multer';
+import { Screen } from './entities/screen.entity';
+import { ScreensService } from './screens.service';
+import { ScreensController } from './screens.controller';
+import { ScreensPublicController } from './screens-public.controller';
+
+@Module({
+  imports: [
+    TypeOrmModule.forFeature([Screen]),
+    MulterModule.register({ storage: multer.memoryStorage() }),
+  ],
+  controllers: [ScreensController, ScreensPublicController],
+  providers: [ScreensService],
+  exports: [ScreensService],
+})
+export class ScreensModule {}

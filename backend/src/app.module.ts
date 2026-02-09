@@ -8,6 +8,7 @@ import { AccountingModule } from './accounting/accounting.module';
 import { AgentsModule } from './agents/agents.module';
 import { ServicesModule } from './services/services.module';
 import { HrModule } from './hr/hr.module';
+import { ScreensModule } from './screens/screens.module';
 import { UsersService } from './users/users.service';
 import { InitialSchema1738166400000 } from './migrations/1738166400000-InitialSchema';
 import { AddPermissions1738252800000 } from './migrations/1738252800000-AddPermissions';
@@ -21,6 +22,7 @@ import { AddHrEventsShare1738771300000 } from './migrations/1738771300000-AddHrE
 import { AddHrEventsColor1738771400000 } from './migrations/1738771400000-AddHrEventsColor';
 import { AddHrListsShare1738771500000 } from './migrations/1738771500000-AddHrListsShare';
 import { ListSharePerList1738771600000 } from './migrations/1738771600000-ListSharePerList';
+import { AddScreensModule1738771800000 } from './migrations/1738771800000-AddScreensModule';
 
 @Module({
   imports: [
@@ -34,7 +36,7 @@ import { ListSharePerList1738771600000 } from './migrations/1738771600000-ListSh
       database: process.env.DB_DATABASE || 'kidney_office',
       autoLoadEntities: true,
       synchronize: process.env.NODE_ENV !== 'production',
-      migrations: [InitialSchema1738166400000, AddPermissions1738252800000, AddHrTables1738339200000, AddHrFolders1738425600000, AddHrDetailPermissions1738512000000, AddHrDeleteAllAndManageFields1738598400000, AddHrEvents1738684800000, AddHrEventsEndDate1738771200000, AddHrEventsShare1738771300000, AddHrEventsColor1738771400000, AddHrListsShare1738771500000, ListSharePerList1738771600000],
+      migrations: [InitialSchema1738166400000, AddPermissions1738252800000, AddHrTables1738339200000, AddHrFolders1738425600000, AddHrDetailPermissions1738512000000, AddHrDeleteAllAndManageFields1738598400000, AddHrEvents1738684800000, AddHrEventsEndDate1738771200000, AddHrEventsShare1738771300000, AddHrEventsColor1738771400000, AddHrListsShare1738771500000, ListSharePerList1738771600000, AddScreensModule1738771800000],
       migrationsRun: false,
     }),
     HealthModule,
@@ -44,6 +46,7 @@ import { ListSharePerList1738771600000 } from './migrations/1738771600000-ListSh
     AgentsModule,
     ServicesModule,
     HrModule,
+    ScreensModule,
   ],
 })
 export class AppModule implements OnModuleInit {
