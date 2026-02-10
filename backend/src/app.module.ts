@@ -4,11 +4,11 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
-import { AccountingModule } from './accounting/accounting.module';
 import { AgentsModule } from './agents/agents.module';
 import { ServicesModule } from './services/services.module';
 import { HrModule } from './hr/hr.module';
 import { ScreensModule } from './screens/screens.module';
+import { Bitrix24Module } from './bitrix24/bitrix24.module';
 import { UsersService } from './users/users.service';
 import { InitialSchema1738166400000 } from './migrations/1738166400000-InitialSchema';
 import { AddPermissions1738252800000 } from './migrations/1738252800000-AddPermissions';
@@ -25,6 +25,8 @@ import { ListSharePerList1738771600000 } from './migrations/1738771600000-ListSh
 import { AddScreensModule1738771800000 } from './migrations/1738771800000-AddScreensModule';
 import { AddUserLogin1738950000000 } from './migrations/1738950000000-AddUserLogin';
 import { AddAppSettings1738953600000 } from './migrations/1738953600000-AddAppSettings';
+import { RemoveAccountingPermission1738953700000 } from './migrations/1738953700000-RemoveAccountingPermission';
+import { AddBitrix24Permission1738953800000 } from './migrations/1738953800000-AddBitrix24Permission';
 
 @Module({
   imports: [
@@ -38,17 +40,17 @@ import { AddAppSettings1738953600000 } from './migrations/1738953600000-AddAppSe
       database: process.env.DB_DATABASE || 'kidney_office',
       autoLoadEntities: true,
       synchronize: process.env.NODE_ENV !== 'production',
-      migrations: [InitialSchema1738166400000, AddPermissions1738252800000, AddHrTables1738339200000, AddHrFolders1738425600000, AddHrDetailPermissions1738512000000, AddHrDeleteAllAndManageFields1738598400000, AddHrEvents1738684800000, AddHrEventsEndDate1738771200000, AddHrEventsShare1738771300000, AddHrEventsColor1738771400000, AddHrListsShare1738771500000, ListSharePerList1738771600000, AddScreensModule1738771800000, AddUserLogin1738950000000, AddAppSettings1738953600000],
+      migrations: [InitialSchema1738166400000, AddPermissions1738252800000, AddHrTables1738339200000, AddHrFolders1738425600000, AddHrDetailPermissions1738512000000, AddHrDeleteAllAndManageFields1738598400000, AddHrEvents1738684800000, AddHrEventsEndDate1738771200000, AddHrEventsShare1738771300000, AddHrEventsColor1738771400000, AddHrListsShare1738771500000, ListSharePerList1738771600000, AddScreensModule1738771800000, AddUserLogin1738950000000, AddAppSettings1738953600000, RemoveAccountingPermission1738953700000, AddBitrix24Permission1738953800000],
       migrationsRun: false,
     }),
     HealthModule,
     AuthModule,
     UsersModule,
-    AccountingModule,
     AgentsModule,
     ServicesModule,
     HrModule,
     ScreensModule,
+    Bitrix24Module,
   ],
 })
 export class AppModule implements OnModuleInit {

@@ -169,12 +169,12 @@ export class UsersService {
     const count = await this.permissionRepo.count();
     if (count > 0) return;
     await this.permissionRepo.save([
-      { slug: 'accounting', name: 'Учёт' },
       { slug: 'agents', name: 'Агенты' },
       { slug: 'services', name: 'Сервисы' },
       { slug: 'hr', name: 'HR' },
       { slug: 'users', name: 'Пользователи' },
       { slug: 'screens', name: 'Настройка экранов' },
+      { slug: 'bitrix24', name: 'Битрикс24' },
     ]);
   }
 }

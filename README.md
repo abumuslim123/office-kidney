@@ -1,6 +1,6 @@
 # Kidney Office
 
-Многофункциональный офисный сервис: авторизация по ролям, пользователи, модули учёта, ИИ-агенты, фоновые сервисы. Домен: kidney-office.srvu.ru
+Многофункциональный офисный сервис: авторизация по ролям, пользователи, ИИ-агенты, фоновые сервисы. Домен: kidney-office.srvu.ru
 
 ## Стек
 
@@ -82,6 +82,6 @@ docker compose -f docker/docker-compose.prod.yml --env-file .env.production up -
 
 ## Структура
 
-- `backend/` — NestJS API (auth, users, accounting, agents, services)
+- `backend/` — NestJS API (auth, users, agents, services)
 - `frontend/` — React SPA (логин, layout, пользователи, заглушки модулей)
 - `docker/` — Dockerfile и docker-compose для полного стека

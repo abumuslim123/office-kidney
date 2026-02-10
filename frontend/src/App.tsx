@@ -4,9 +4,10 @@ import Login from './pages/Login';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Users from './pages/Users';
-import Accounting from './pages/Accounting';
 import Agents from './pages/Agents';
 import Services from './pages/Services';
+import Bitrix24 from './pages/Bitrix24';
+import Bitrix24Employees from './pages/Bitrix24Employees';
 import HR from './pages/HR';
 import HrListView from './pages/HrListView';
 import HrEvents from './pages/HrEvents';
@@ -42,8 +43,9 @@ function App() {
         <Route index element={<Dashboard />} />
         <Route path="users" element={<ProtectedRoute permissions={['users']}><Users /></ProtectedRoute>} />
         <Route path="screens" element={<ProtectedRoute permissions={['screens']}><Screens /></ProtectedRoute>} />
-        <Route path="accounting" element={<ProtectedRoute permissions={['accounting']}><Accounting /></ProtectedRoute>} />
         <Route path="agents" element={<ProtectedRoute permissions={['agents']}><Agents /></ProtectedRoute>} />
+        <Route path="bitrix24" element={<ProtectedRoute permissions={['bitrix24']}><Bitrix24 /></ProtectedRoute>} />
+        <Route path="bitrix24/employees" element={<ProtectedRoute permissions={['bitrix24']}><Bitrix24Employees /></ProtectedRoute>} />
         <Route path="services" element={<ProtectedRoute permissions={['services']}><Services /></ProtectedRoute>} />
         <Route path="hr" element={<ProtectedRoute permissions={['hr']}><HR /></ProtectedRoute>} />
         <Route path="hr/events" element={<ProtectedRoute permissions={['hr']}><HrEvents /></ProtectedRoute>} />
