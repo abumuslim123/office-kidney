@@ -158,6 +158,8 @@ export class CallsController {
     if (!filePath) return res.status(404).send('Audio not found');
     const ext = path.extname(filePath).toLowerCase();
     const contentType = ext === '.mp3' ? 'audio/mpeg' : ext === '.wav' ? 'audio/wav' : 'application/octet-stream';
+    const safeExt = ext && /^\.\w+$/.test(ext) ? ext : '';
+    res.setHeader('Content-Disposition', `attachment; filename="call-${id}${safeExt}"`);
     res.setHeader('Content-Type', contentType);
     const stream = createReadStream(filePath);
     stream.pipe(res);

@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -110,6 +110,24 @@ const highlightText = (text: string, keywords: string[]) => {
   return escapeHtml(text).replace(regex, '<mark class="bg-yellow-200 text-gray-900 px-1 rounded">$1</mark>');
 };
 
+const splitTranscript = (text: string) => {
+  const rawLines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const lines = rawLines.length
+    ? rawLines
+    : text
+      .split(/(?<=[.!?])\s+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  if (!lines.length) return [];
+  return lines.map((line, idx) => ({
+    speaker: idx % 2 === 0 ? 'Оператор' : 'Собеседник',
+    text: line,
+  }));
+};
+
 export default function Calls() {
   const { user } = useAuth();
   const [calls, setCalls] = useState<CallRow[]>([]);
@@ -125,6 +143,7 @@ export default function Calls() {
   const [filterTo, setFilterTo] = useState('');
   const [filterEmployees, setFilterEmployees] = useState<string[]>([]);
   const [filterTopics, setFilterTopics] = useState<string[]>([]);
+  const [searchParams] = useSearchParams();
 
   const [uploadEmployeeName, setUploadEmployeeName] = useState('');
   const [uploadClientName, setUploadClientName] = useState('');
@@ -170,7 +189,26 @@ export default function Calls() {
   };
 
   useEffect(() => {
-    loadData();
+    const from = searchParams.get('from');
+    const to = searchParams.get('to');
+    const topicsParam = searchParams.get('topics');
+    const employeesParam = searchParams.get('employees');
+    if (from) {
+      const date = new Date(from);
+      if (!Number.isNaN(date.getTime())) setFilterFrom(toLocalInput(date));
+    }
+    if (to) {
+      const date = new Date(to);
+      if (!Number.isNaN(date.getTime())) setFilterTo(toLocalInput(date));
+    }
+    if (topicsParam) setFilterTopics(topicsParam.split(',').filter(Boolean));
+    if (employeesParam) setFilterEmployees(employeesParam.split(',').filter(Boolean));
+    const params: Record<string, string> = {};
+    if (from) params.from = from;
+    if (to) params.to = to;
+    if (topicsParam) params.topics = topicsParam;
+    if (employeesParam) params.employees = employeesParam;
+    loadData(Object.keys(params).length ? params : undefined);
   }, []);
 
   const applyFilters = async () => {
@@ -489,6 +527,7 @@ export default function Calls() {
                 const keywords = call.matches.map((m) => m.keyword);
                 const audioUrl = `${apiBase}/calls/${call.id}/audio`;
                 const isExpanded = expandedCallId === call.id;
+                const hasAudio = call.status !== 'no_audio';
                 return (
                   <Fragment key={call.id}>
                     <tr className="align-top">
@@ -536,26 +575,37 @@ export default function Calls() {
                         >
                           {isExpanded ? 'Скрыть текст' : 'Текст'}
                         </button>
-                        <a href={audioUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">
-                          Аудио
-                        </a>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteAudio(call.id)}
-                        className="text-red-600 hover:underline"
-                      >
-                        Удалить аудио
-                      </button>
+                      {hasAudio && (
+                        <>
+                          <a href={audioUrl} download className="text-accent hover:underline">
+                            Аудио
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteAudio(call.id)}
+                            className="text-red-600 hover:underline"
+                          >
+                            Удалить аудио
+                          </button>
+                        </>
+                      )}
                       </td>
                     </tr>
                     {isExpanded && call.transcript?.text && (
                       <tr>
                         <td colSpan={7} className="px-4 py-3 bg-gray-50">
                           <div className="text-sm font-medium text-gray-900 mb-2">Транскрипт</div>
-                          <div
-                            className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed"
-                            dangerouslySetInnerHTML={{ __html: highlightText(call.transcript.text, keywords) }}
-                          />
+                          <div className="space-y-3">
+                            {splitTranscript(call.transcript.text).map((chunk, idx) => (
+                              <div key={`${call.id}-chunk-${idx}`}>
+                                <div className="text-xs font-semibold text-gray-500 mb-1">{chunk.speaker}</div>
+                                <div
+                                  className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed"
+                                  dangerouslySetInnerHTML={{ __html: highlightText(chunk.text, keywords) }}
+                                />
+                              </div>
+                            ))}
+                          </div>
                         </td>
                       </tr>
                     )}

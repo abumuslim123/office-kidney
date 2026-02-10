@@ -515,6 +515,11 @@ export class CallsService {
         }
       }
     }
+    try {
+      await fs.rm(path.join(this.audioDir, call.id), { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
     call.audioPath = '';
     call.status = 'no_audio';
     call.durationSeconds = 0;
