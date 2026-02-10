@@ -6,6 +6,8 @@ type ScreenRow = {
   deviceId: string;
   name: string | null;
   currentVideoPath: string | null;
+  photosCount?: number;
+  firstPhotoId?: string | null;
   createdAt: string;
   lastSeenAt: string | null;
 };
@@ -25,6 +27,8 @@ type ScreenPhoto = {
 export default function Screens() {
   const [screens, setScreens] = useState<ScreenRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [defaultPhotoDurationSeconds, setDefaultPhotoDurationSeconds] = useState<number>(15);
+  const [savingDefaultDuration, setSavingDefaultDuration] = useState(false);
   const [editScreen, setEditScreen] = useState<ScreenRow | null>(null);
   const [editName, setEditName] = useState('');
   const [editError, setEditError] = useState('');
@@ -36,6 +40,8 @@ export default function Screens() {
   const [photoUploadingId, setPhotoUploadingId] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string>('');
   const [photosByScreen, setPhotosByScreen] = useState<Record<string, ScreenPhoto[]>>({});
+  const [dirtyPhotosByScreen, setDirtyPhotosByScreen] = useState<Record<string, Record<string, true>>>({});
+  const [savingAllPhotosId, setSavingAllPhotosId] = useState<string | null>(null);
 
   const toLocalInput = (utcIso: string) => {
     const date = new Date(utcIso);
@@ -66,27 +72,6 @@ export default function Screens() {
     try {
       const res = await api.get<ScreenRow[]>('/screens');
       setScreens(res.data);
-      const noVideo = res.data.filter((s) => !s.currentVideoPath);
-      void Promise.all(
-        noVideo.map(async (s) => {
-          try {
-            const photosRes = await api.get<ScreenPhoto[]>(`/screens/${s.id}/photos`);
-            return { id: s.id, photos: photosRes.data };
-          } catch {
-            return null;
-          }
-        }),
-      ).then((items) => {
-        const updates = items.filter(Boolean) as { id: string; photos: ScreenPhoto[] }[];
-        if (updates.length === 0) return;
-        setPhotosByScreen((prev) => {
-          const next = { ...prev };
-          updates.forEach((u) => {
-            next[u.id] = u.photos;
-          });
-          return next;
-        });
-      });
     } catch {
       setScreens([]);
     } finally {
@@ -96,7 +81,28 @@ export default function Screens() {
 
   useEffect(() => {
     load();
+    api.get<{ defaultPhotoDurationSeconds: number }>('/screens/settings')
+      .then((r) => {
+        const v = Number(r.data?.defaultPhotoDurationSeconds);
+        if (Number.isFinite(v) && v > 0) setDefaultPhotoDurationSeconds(v);
+      })
+      .catch(() => {});
   }, []);
+
+  const saveDefaultDuration = async () => {
+    setSavingDefaultDuration(true);
+    try {
+      const res = await api.put<{ defaultPhotoDurationSeconds: number }>('/screens/settings', {
+        defaultPhotoDurationSeconds,
+      });
+      const v = Number(res.data?.defaultPhotoDurationSeconds);
+      if (Number.isFinite(v) && v > 0) setDefaultPhotoDurationSeconds(v);
+    } catch {
+      setPhotoError('Ошибка сохранения длительности по умолчанию');
+    } finally {
+      setSavingDefaultDuration(false);
+    }
+  };
 
   const loadPhotos = async (screenId: string) => {
     setPhotoLoadingId(screenId);
@@ -104,6 +110,11 @@ export default function Screens() {
     try {
       const res = await api.get<ScreenPhoto[]>(`/screens/${screenId}/photos`);
       setPhotosByScreen((prev) => ({ ...prev, [screenId]: res.data }));
+      setDirtyPhotosByScreen((prev) => {
+        const next = { ...prev };
+        delete next[screenId];
+        return next;
+      });
     } catch {
       setPhotoError('Ошибка загрузки фото');
     } finally {
@@ -203,7 +214,7 @@ export default function Screens() {
         const file = files[i];
         const form = new FormData();
         form.append('file', file);
-        form.append('durationSeconds', '15');
+        form.append('durationSeconds', String(defaultPhotoDurationSeconds));
         form.append('rotation', '0');
         form.append('orderIndex', String((photosByScreen[screenId]?.length || 0) + i));
         await api.post(`/screens/${screenId}/photos`, form);
@@ -225,19 +236,44 @@ export default function Screens() {
       ...prev,
       [screenId]: (prev[screenId] || []).map((p) => (p.id === photoId ? { ...p, ...patch } : p)),
     }));
+    setDirtyPhotosByScreen((prev) => ({
+      ...prev,
+      [screenId]: { ...(prev[screenId] || {}), [photoId]: true },
+    }));
   };
 
-  const handlePhotoSave = async (screenId: string, photo: ScreenPhoto) => {
+  const handleSaveAllPhotos = async (screenId: string) => {
+    const dirty = dirtyPhotosByScreen[screenId] || {};
+    const dirtyIds = Object.keys(dirty);
+    if (!dirtyIds.length) return;
+    setSavingAllPhotosId(screenId);
+    setPhotoError('');
     try {
-      await api.patch(`/screens/photos/${photo.id}`, {
-        durationSeconds: photo.durationSeconds,
-        rotation: photo.rotation,
-        orderIndex: photo.orderIndex,
-        expiresAt: photo.expiresAt || null,
-      });
+      const photos = photosByScreen[screenId] || [];
+      const toSave = photos.filter((p) => dirty[p.id]);
+      await Promise.all(toSave.map((p) => api.patch(`/screens/photos/${p.id}`, {
+        durationSeconds: p.durationSeconds,
+        rotation: p.rotation,
+        orderIndex: p.orderIndex,
+        expiresAt: p.expiresAt || null,
+      })));
       await loadPhotos(screenId);
     } catch {
       setPhotoError('Ошибка сохранения фото');
+    } finally {
+      setSavingAllPhotosId(null);
+    }
+  };
+
+  const handleDeleteAllPhotos = async (screenId: string) => {
+    if (!confirm('Удалить ВСЕ фото этого экрана? Это действие необратимо.')) return;
+    setPhotoError('');
+    try {
+      await api.delete(`/screens/${screenId}/photos`);
+      await loadPhotos(screenId);
+      await load();
+    } catch {
+      setPhotoError('Ошибка удаления фото');
     }
   };
 
@@ -265,6 +301,34 @@ export default function Screens() {
 
       <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-600">
         Установите приложение на телевизор и запустите его. После первого запроса телевизор появится в списке ниже. Загрузите видео для экрана — оно будет автоматически воспроизводиться в приложении на ТВ.
+      </div>
+
+      <div className="mb-6 p-4 bg-white border border-gray-200 rounded-lg">
+        <div className="text-sm font-medium text-gray-900 mb-2">Фото: настройки по умолчанию</div>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-xs text-gray-600">
+            Длительность (сек)
+            <input
+              type="number"
+              min={1}
+              max={3600}
+              value={defaultPhotoDurationSeconds}
+              onChange={(e) => setDefaultPhotoDurationSeconds(Number(e.target.value))}
+              className="mt-1 w-40 border border-gray-300 rounded px-2 py-1 text-sm"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={saveDefaultDuration}
+            disabled={savingDefaultDuration}
+            className="px-3 py-1.5 bg-accent text-white rounded text-sm font-medium hover:opacity-90 disabled:opacity-50"
+          >
+            {savingDefaultDuration ? 'Сохранение...' : 'Сохранить'}
+          </button>
+        </div>
+        <div className="mt-2 text-xs text-gray-500">
+          Используется при загрузке новых фото.
+        </div>
       </div>
 
       <div className="mb-4">
@@ -335,16 +399,16 @@ export default function Screens() {
                           </div>
                           <span className="text-gray-600">Да</span>
                         </div>
-                      ) : (photosByScreen[s.id] || []).length > 0 ? (
+                      ) : s.firstPhotoId ? (
                         <div className="flex items-center gap-2">
                           <div className="w-[120px] h-[68px] rounded overflow-hidden bg-gray-200 shrink-0">
                             <img
-                              src={`${api.defaults.baseURL}/public/screens/photo/${photosByScreen[s.id][0].id}`}
+                              src={`${api.defaults.baseURL}/public/screens/photo/${s.firstPhotoId}`}
                               alt=""
                               className="w-full h-full object-cover"
                             />
                           </div>
-                          <span className="text-gray-600">Фото</span>
+                          <span className="text-gray-600">Фото{s.photosCount ? ` (${s.photosCount})` : ''}</span>
                         </div>
                       ) : (
                         'Нет'
@@ -399,17 +463,36 @@ export default function Screens() {
                       <td colSpan={5} className="px-4 py-4 bg-gray-50">
                         <div className="flex items-center justify-between mb-3">
                           <div className="text-sm text-gray-700 font-medium">Фото для слайдшоу</div>
-                          <label className="text-accent hover:underline cursor-pointer text-sm">
-                            {photoUploadingId === s.id ? 'Загрузка фото...' : 'Загрузить фото'}
-                            <input
-                              type="file"
-                              accept="image/*"
-                              multiple
-                              className="hidden"
-                              disabled={photoUploadingId !== null}
-                              onChange={(e) => handlePhotoUpload(s.id, e)}
-                            />
-                          </label>
+                          <div className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => handleSaveAllPhotos(s.id)}
+                              disabled={savingAllPhotosId === s.id || Object.keys(dirtyPhotosByScreen[s.id] || {}).length === 0}
+                              className="text-sm px-3 py-1.5 rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              {savingAllPhotosId === s.id
+                                ? 'Сохранение...'
+                                : `Сохранить все${Object.keys(dirtyPhotosByScreen[s.id] || {}).length ? ` (${Object.keys(dirtyPhotosByScreen[s.id] || {}).length})` : ''}`}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteAllPhotos(s.id)}
+                              className="text-sm px-3 py-1.5 rounded border border-red-300 text-red-700 bg-white hover:bg-red-50"
+                            >
+                              Удалить все фото
+                            </button>
+                            <label className="text-accent hover:underline cursor-pointer text-sm">
+                              {photoUploadingId === s.id ? 'Загрузка фото...' : 'Загрузить фото'}
+                              <input
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                className="hidden"
+                                disabled={photoUploadingId !== null}
+                                onChange={(e) => handlePhotoUpload(s.id, e)}
+                              />
+                            </label>
+                          </div>
                         </div>
                         {photoLoadingId === s.id ? (
                           <p className="text-sm text-gray-500">Загрузка фото...</p>
@@ -484,13 +567,6 @@ export default function Screens() {
                                       </label>
                                     </div>
                                     <div className="flex flex-col gap-2">
-                                      <button
-                                        type="button"
-                                        onClick={() => handlePhotoSave(s.id, p)}
-                                        className="text-sm text-accent hover:underline"
-                                      >
-                                        Сохранить
-                                      </button>
                                       <button
                                         type="button"
                                         onClick={() => handlePhotoDelete(s.id, p.id)}

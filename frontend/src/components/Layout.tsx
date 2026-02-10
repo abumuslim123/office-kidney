@@ -58,7 +58,7 @@ export default function Layout() {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-600">
-            {user?.displayName || user?.email} <span className="text-gray-400">({user?.role})</span>
+            {user?.displayName || user?.login || user?.email} <span className="text-gray-400">({user?.role})</span>
           </span>
           <button
             type="button"

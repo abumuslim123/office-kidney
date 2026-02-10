@@ -9,7 +9,8 @@ export type Permission = {
 
 export type UserInfo = {
   id: string;
-  email: string;
+  login: string;
+  email?: string;
   displayName: string;
   role: string;
   permissions: Permission[];
@@ -20,7 +21,7 @@ type AuthContextValue = {
   accessToken: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (login: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 };
@@ -93,12 +94,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = useCallback(
-    async (email: string, password: string) => {
+    async (login: string, password: string) => {
       const { data } = await api.post<{
         accessToken: string;
         refreshToken: string;
         user: UserInfo;
-      }>('/auth/login', { email, password });
+      }>('/auth/login', { login, password });
       persist(data.accessToken, data.refreshToken, data.user);
     },
     [persist]

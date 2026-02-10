@@ -6,7 +6,8 @@ type Role = { id: string; slug: string; name: string };
 type Permission = { id: string; slug: string; name: string };
 type UserRow = {
   id: string;
-  email: string;
+  login: string;
+  email?: string;
   displayName: string;
   isActive: boolean;
   role: Role;
@@ -21,10 +22,10 @@ export default function Users() {
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ email: '', password: '', displayName: '', roleId: '', isActive: true, permissionIds: [] as string[] });
+  const [form, setForm] = useState({ login: '', email: '', password: '', displayName: '', roleId: '', isActive: true, permissionIds: [] as string[] });
   const [error, setError] = useState('');
   const [editingUser, setEditingUser] = useState<UserRow | null>(null);
-  const [editForm, setEditForm] = useState({ email: '', displayName: '', roleId: '', isActive: true, permissionIds: [] as string[] });
+  const [editForm, setEditForm] = useState({ login: '', email: '', displayName: '', roleId: '', isActive: true, permissionIds: [] as string[] });
   const [editError, setEditError] = useState('');
   const [passwordUser, setPasswordUser] = useState<UserRow | null>(null);
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '' });
@@ -57,7 +58,7 @@ export default function Users() {
     try {
       await api.post('/users', form);
       setShowForm(false);
-      setForm({ email: '', password: '', displayName: '', roleId: roles[0]?.id || '', isActive: true, permissionIds: [] });
+      setForm({ login: '', email: '', password: '', displayName: '', roleId: roles[0]?.id || '', isActive: true, permissionIds: [] });
       load();
     } catch (err: unknown) {
       const data = err && typeof err === 'object' && 'response' in err
@@ -89,7 +90,8 @@ export default function Users() {
   const openEdit = (u: UserRow) => {
     setEditingUser(u);
     setEditForm({
-      email: u.email,
+      login: u.login || '',
+      email: u.email ?? '',
       displayName: u.displayName || '',
       roleId: u.role?.id || roles[0]?.id || '',
       isActive: u.isActive,
@@ -175,11 +177,18 @@ export default function Users() {
           {error && <p className="text-red-600 text-sm mb-2">{error}</p>}
           <div className="grid gap-3">
             <input
+              type="text"
+              placeholder="Логин"
+              value={form.login}
+              onChange={(e) => setForm((f) => ({ ...f, login: e.target.value }))}
+              required
+              className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+            />
+            <input
               type="email"
-              placeholder="Email"
+              placeholder="Email (необязательно)"
               value={form.email}
               onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-              required
               className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
             />
             <input
@@ -270,11 +279,18 @@ export default function Users() {
           {editError && <p className="text-red-600 text-sm mb-2">{editError}</p>}
           <div className="grid gap-3">
             <input
+              type="text"
+              placeholder="Логин"
+              value={editForm.login}
+              onChange={(e) => setEditForm((f) => ({ ...f, login: e.target.value }))}
+              required
+              className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+            />
+            <input
               type="email"
-              placeholder="Email"
+              placeholder="Email (необязательно)"
               value={editForm.email}
               onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
-              required
               className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
             />
             <input
@@ -369,7 +385,7 @@ export default function Users() {
       {passwordUser && (
         <form onSubmit={handleChangePassword} className="mb-6 p-4 bg-white border border-gray-200 rounded-lg max-w-md">
           <h3 className="text-lg font-medium text-gray-900 mb-3">
-            Сменить пароль {currentUser?.id === passwordUser.id ? '(свой)' : `— ${passwordUser.email}`}
+            Сменить пароль {currentUser?.id === passwordUser.id ? '(свой)' : `— ${passwordUser.login}`}
           </h3>
           {passwordError && <p className="text-red-600 text-sm mb-2">{passwordError}</p>}
           <div className="grid gap-3">
@@ -414,6 +430,7 @@ export default function Users() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
+                <th className="text-left px-4 py-3 font-medium text-gray-700">Логин</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-700">Email</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-700">Имя</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-700">Роль</th>
@@ -425,7 +442,8 @@ export default function Users() {
             <tbody>
               {users.map((u) => (
                 <tr key={u.id} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3">{u.email}</td>
+                  <td className="px-4 py-3">{u.login}</td>
+                  <td className="px-4 py-3">{u.email ?? '—'}</td>
                   <td className="px-4 py-3">{u.displayName || '—'}</td>
                   <td className="px-4 py-3">{u.role?.name}</td>
                   <td className="px-4 py-3">

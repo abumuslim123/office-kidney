@@ -6,24 +6,84 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { Screen } from './entities/screen.entity';
 import { ScreenPhoto } from './entities/screen-photo.entity';
+import { AppSetting } from '../settings/entities/app-setting.entity';
 
 @Injectable()
 export class ScreensService {
   private readonly videoDir: string;
+  private readonly SETTING_DEFAULT_DURATION = 'screensDefaultPhotoDurationSeconds';
 
   constructor(
     @InjectRepository(Screen)
     private repo: Repository<Screen>,
     @InjectRepository(ScreenPhoto)
     private photoRepo: Repository<ScreenPhoto>,
+    @InjectRepository(AppSetting)
+    private settingsRepo: Repository<AppSetting>,
     private config: ConfigService,
   ) {
     const base = this.config.get<string>('SCREENS_VIDEO_DIR') || path.join(process.cwd(), 'uploads', 'screens');
     this.videoDir = path.isAbsolute(base) ? base : path.join(process.cwd(), base);
   }
 
+  async getSettings(): Promise<{ defaultPhotoDurationSeconds: number }> {
+    const row = await this.settingsRepo.findOne({ where: { key: this.SETTING_DEFAULT_DURATION } });
+    const value = row?.value ? parseInt(row.value, 10) : 15;
+    return { defaultPhotoDurationSeconds: Number.isFinite(value) && value > 0 ? value : 15 };
+  }
+
+  async updateSettings(data: { defaultPhotoDurationSeconds: number }): Promise<{ defaultPhotoDurationSeconds: number }> {
+    const raw = data.defaultPhotoDurationSeconds;
+    const normalized = Math.max(1, Math.min(Math.trunc(raw || 15), 3600));
+    await this.settingsRepo.save({ key: this.SETTING_DEFAULT_DURATION, value: String(normalized) });
+    return { defaultPhotoDurationSeconds: normalized };
+  }
+
   async findAll(): Promise<Screen[]> {
     return this.repo.find({ order: { createdAt: 'DESC' } });
+  }
+
+  async findAllWithPhotoPreview(): Promise<
+    (Screen & { photosCount: number; firstPhotoId: string | null })[]
+  > {
+    const screens = await this.findAll();
+    if (!screens.length) return [];
+
+    const screenIds = screens.map((s) => s.id);
+    const now = new Date();
+
+    const countsRaw = await this.photoRepo
+      .createQueryBuilder('p')
+      .select('p.screenId', 'screenId')
+      .addSelect('COUNT(*)', 'count')
+      .where('p.screenId IN (:...screenIds)', { screenIds })
+      .andWhere('(p.expiresAt IS NULL OR p.expiresAt > :now)', { now })
+      .groupBy('p.screenId')
+      .getRawMany<{ screenId: string; count: string }>();
+
+    const firstRaw = await this.photoRepo
+      .createQueryBuilder('p')
+      .distinctOn(['p.screenId'])
+      .select('p.id', 'id')
+      .addSelect('p.screenId', 'screenId')
+      .where('p.screenId IN (:...screenIds)', { screenIds })
+      .andWhere('(p.expiresAt IS NULL OR p.expiresAt > :now)', { now })
+      .orderBy('p.screenId', 'ASC')
+      .addOrderBy('p.orderIndex', 'ASC')
+      .addOrderBy('p.createdAt', 'ASC')
+      .getRawMany<{ id: string; screenId: string }>();
+
+    const countsMap = new Map<string, number>();
+    countsRaw.forEach((r) => countsMap.set(r.screenId, parseInt(r.count, 10) || 0));
+
+    const firstMap = new Map<string, string>();
+    firstRaw.forEach((r) => firstMap.set(r.screenId, r.id));
+
+    return screens.map((s) => ({
+      ...s,
+      photosCount: countsMap.get(s.id) || 0,
+      firstPhotoId: firstMap.get(s.id) || null,
+    }));
   }
 
   async findOne(id: string): Promise<Screen> {
@@ -126,6 +186,28 @@ export class ScreensService {
       // ignore if file missing
     }
     await this.photoRepo.remove(photo);
+  }
+
+  async deleteAllPhotos(screenId: string): Promise<void> {
+    await this.findOne(screenId);
+    const photos = await this.photoRepo.find({ where: { screenId } });
+    await Promise.all(
+      photos.map(async (p) => {
+        const fullPath = path.join(this.videoDir, p.imagePath);
+        try {
+          await fs.rm(fullPath);
+        } catch {
+          // ignore if file missing
+        }
+      }),
+    );
+    await this.photoRepo.delete({ screenId });
+    const dir = this.getPhotosDir(screenId);
+    try {
+      await fs.rm(dir, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
   }
 
   async getPhotoPath(photoId: string): Promise<string | null> {

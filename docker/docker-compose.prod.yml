@@ -59,6 +59,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      - ../backend/apk:/app/apk:ro
+      - ../backend/uploads:/app/uploads
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:3000/api/health"]
       interval: 30s

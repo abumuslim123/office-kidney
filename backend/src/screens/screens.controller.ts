@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Put,
   Patch,
   Post,
   Delete,
@@ -30,7 +31,17 @@ export class ScreensController {
 
   @Get()
   list() {
-    return this.screens.findAll();
+    return this.screens.findAllWithPhotoPreview();
+  }
+
+  @Get('settings')
+  getSettings() {
+    return this.screens.getSettings();
+  }
+
+  @Put('settings')
+  updateSettings(@Body() body: { defaultPhotoDurationSeconds: number }) {
+    return this.screens.updateSettings(body);
   }
 
   @Get('apk')
@@ -101,6 +112,12 @@ export class ScreensController {
       expiresAt,
       orderIndex,
     );
+  }
+
+  @Delete(':id/photos')
+  async deleteAllPhotos(@Param('id') id: string) {
+    await this.screens.deleteAllPhotos(id);
+    return { success: true };
   }
 
   @Patch('photos/:photoId')

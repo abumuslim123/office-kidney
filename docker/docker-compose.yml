@@ -36,6 +36,7 @@ services:
       SCREENS_APK_PATH: apk/kidney-office-tv.apk
     volumes:
       - ../backend/apk:/app/apk:ro
+      - ../backend/uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
