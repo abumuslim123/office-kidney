@@ -27,6 +27,9 @@ import { AddUserLogin1738950000000 } from './migrations/1738950000000-AddUserLog
 import { AddAppSettings1738953600000 } from './migrations/1738953600000-AddAppSettings';
 import { RemoveAccountingPermission1738953700000 } from './migrations/1738953700000-RemoveAccountingPermission';
 import { AddBitrix24Permission1738953800000 } from './migrations/1738953800000-AddBitrix24Permission';
+import { AddCallsModule1739210000000 } from './migrations/1739210000000-AddCallsModule';
+import { AddCallsSettingsPermissions1739211000000 } from './migrations/1739211000000-AddCallsSettingsPermissions';
+import { CallsModule } from './calls/calls.module';
 
 @Module({
   imports: [
@@ -40,7 +43,7 @@ import { AddBitrix24Permission1738953800000 } from './migrations/1738953800000-A
       database: process.env.DB_DATABASE || 'kidney_office',
       autoLoadEntities: true,
       synchronize: process.env.NODE_ENV !== 'production',
-      migrations: [InitialSchema1738166400000, AddPermissions1738252800000, AddHrTables1738339200000, AddHrFolders1738425600000, AddHrDetailPermissions1738512000000, AddHrDeleteAllAndManageFields1738598400000, AddHrEvents1738684800000, AddHrEventsEndDate1738771200000, AddHrEventsShare1738771300000, AddHrEventsColor1738771400000, AddHrListsShare1738771500000, ListSharePerList1738771600000, AddScreensModule1738771800000, AddUserLogin1738950000000, AddAppSettings1738953600000, RemoveAccountingPermission1738953700000, AddBitrix24Permission1738953800000],
+      migrations: [InitialSchema1738166400000, AddPermissions1738252800000, AddHrTables1738339200000, AddHrFolders1738425600000, AddHrDetailPermissions1738512000000, AddHrDeleteAllAndManageFields1738598400000, AddHrEvents1738684800000, AddHrEventsEndDate1738771200000, AddHrEventsShare1738771300000, AddHrEventsColor1738771400000, AddHrListsShare1738771500000, ListSharePerList1738771600000, AddScreensModule1738771800000, AddUserLogin1738950000000, AddAppSettings1738953600000, RemoveAccountingPermission1738953700000, AddBitrix24Permission1738953800000, AddCallsModule1739210000000, AddCallsSettingsPermissions1739211000000],
       migrationsRun: false,
     }),
     HealthModule,
@@ -51,6 +54,7 @@ import { AddBitrix24Permission1738953800000 } from './migrations/1738953800000-A
     HrModule,
     ScreensModule,
     Bitrix24Module,
+    CallsModule,
   ],
 })
 export class AppModule implements OnModuleInit {

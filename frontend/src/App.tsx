@@ -14,6 +14,9 @@ import HrEvents from './pages/HrEvents';
 import HrEventsPublic from './pages/HrEventsPublic';
 import HrListsPublic from './pages/HrListsPublic';
 import Screens from './pages/Screens';
+import Calls from './pages/Calls';
+import CallTopics from './pages/CallTopics';
+import CallsSettings from './pages/CallsSettings';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -47,6 +50,9 @@ function App() {
         <Route path="bitrix24" element={<ProtectedRoute permissions={['bitrix24']}><Bitrix24 /></ProtectedRoute>} />
         <Route path="bitrix24/employees" element={<ProtectedRoute permissions={['bitrix24']}><Bitrix24Employees /></ProtectedRoute>} />
         <Route path="services" element={<ProtectedRoute permissions={['services']}><Services /></ProtectedRoute>} />
+        <Route path="calls" element={<ProtectedRoute permissions={['calls']}><Calls /></ProtectedRoute>} />
+        <Route path="calls/topics" element={<ProtectedRoute permissions={['calls_manage_topics']}><CallTopics /></ProtectedRoute>} />
+        <Route path="calls/settings" element={<ProtectedRoute permissions={['calls_settings']}><CallsSettings /></ProtectedRoute>} />
         <Route path="hr" element={<ProtectedRoute permissions={['hr']}><HR /></ProtectedRoute>} />
         <Route path="hr/events" element={<ProtectedRoute permissions={['hr']}><HrEvents /></ProtectedRoute>} />
         <Route path="hr/folder/:folderId" element={<ProtectedRoute permissions={['hr']}><HR /></ProtectedRoute>} />

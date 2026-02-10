@@ -175,6 +175,10 @@ export class UsersService {
       { slug: 'users', name: 'Пользователи' },
       { slug: 'screens', name: 'Настройка экранов' },
       { slug: 'bitrix24', name: 'Битрикс24' },
+      { slug: 'calls', name: 'Звонки' },
+      { slug: 'calls_manage_topics', name: 'Тематики звонков' },
+      { slug: 'calls_settings', name: 'Настройки звонков' },
+      { slug: 'calls_api_key', name: 'API ключ Polza.ai' },
     ]);
   }
 }
