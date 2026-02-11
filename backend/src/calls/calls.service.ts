@@ -20,6 +20,7 @@ import {
   CALLS_POLZA_AUDIO_PATH,
 } from './calls-settings.constants';
 import { AitunnelAudioService } from './aitunnel-audio.service';
+import { splitStereoAudioToMonoFiles } from './wav-channel-splitter';
 
 type CallFilters = {
   from?: Date;
@@ -409,32 +410,75 @@ export class CallsService {
     call.status = 'transcribing';
     await this.callRepo.save(call);
 
+    const pickText = (r: unknown): string => {
+      if (!r || typeof r !== 'object') return '';
+      const o = r as Record<string, unknown>;
+      const t = o.text ?? (o.data && typeof o.data === 'object' && (o.data as Record<string, unknown>).text) ?? o.transcript ?? (o.result && typeof o.result === 'object' && (o.result as Record<string, unknown>).text);
+      return typeof t === 'string' ? t : '';
+    };
+    const getLanguage = (r: unknown): string | null => {
+      if (!r || typeof r !== 'object') return null;
+      const o = r as Record<string, unknown>;
+      const lang = o.language ?? (o.data && typeof o.data === 'object' && (o.data as Record<string, unknown>).language);
+      return typeof lang === 'string' ? lang : null;
+    };
+
+    let tempPaths: { leftPath: string; rightPath: string } | null = null;
+
     try {
-      const response = await this.audioProvider.transcribeAudio(audioPath, path.basename(audioPath));
-      const text =
-        response?.text ||
-        response?.data?.text ||
-        response?.transcript ||
-        response?.result?.text ||
-        '';
-      if (!text || typeof text !== 'string') {
-        throw new BadRequestException('Не удалось получить текст транскрибации');
+      const isWavOrMp3 = /\.(wav|mp3)$/i.test(audioPath);
+      if (isWavOrMp3) {
+        tempPaths = await splitStereoAudioToMonoFiles(audioPath);
       }
 
-      const language = response?.language || response?.data?.language || null;
+      let text: string;
+      let operatorText: string | null = null;
+      let abonentText: string | null = null;
+      let response: unknown;
+
+      if (tempPaths) {
+        const [leftResponse, rightResponse] = await Promise.all([
+          this.audioProvider.transcribeAudio(tempPaths.leftPath, 'operator.wav'),
+          this.audioProvider.transcribeAudio(tempPaths.rightPath, 'abonent.wav'),
+        ]);
+        operatorText = pickText(leftResponse) || null;
+        abonentText = pickText(rightResponse) || null;
+        text =
+          (operatorText ? `Оператор:\n${operatorText}` : '') +
+          (operatorText && abonentText ? '\n\n' : '') +
+          (abonentText ? `Собеседник:\n${abonentText}` : '');
+        if (!text.trim()) {
+          throw new BadRequestException('Не удалось получить текст транскрибации');
+        }
+        response = leftResponse;
+      } else {
+        response = await this.audioProvider.transcribeAudio(audioPath, path.basename(audioPath));
+        text = pickText(response);
+        if (!text || typeof text !== 'string') {
+          throw new BadRequestException('Не удалось получить текст транскрибации');
+        }
+      }
+
+      const language = getLanguage(response);
       const durationRaw =
-        response?.duration ||
-        response?.data?.duration ||
-        response?.audio_duration ||
-        response?.meta?.duration;
+        (response && typeof response === 'object' && (
+          (response as { duration?: number }).duration ||
+          (response as { data?: { duration?: number } }).data?.duration ||
+          (response as { audio_duration?: number }).audio_duration ||
+          (response as { meta?: { duration?: number } }).meta?.duration
+        )) as number | undefined;
       const speechRaw =
-        response?.speech_duration_seconds ||
-        response?.data?.speech_duration_seconds ||
-        response?.meta?.speech_duration_seconds;
+        (response && typeof response === 'object' && (
+          (response as { speech_duration_seconds?: number }).speech_duration_seconds ||
+          (response as { data?: { speech_duration_seconds?: number } }).data?.speech_duration_seconds ||
+          (response as { meta?: { speech_duration_seconds?: number } }).meta?.speech_duration_seconds
+        )) as number | undefined;
       const silenceRaw =
-        response?.silence_duration_seconds ||
-        response?.data?.silence_duration_seconds ||
-        response?.meta?.silence_duration_seconds;
+        (response && typeof response === 'object' && (
+          (response as { silence_duration_seconds?: number }).silence_duration_seconds ||
+          (response as { data?: { silence_duration_seconds?: number } }).data?.silence_duration_seconds ||
+          (response as { meta?: { silence_duration_seconds?: number } }).meta?.silence_duration_seconds
+        )) as number | undefined;
 
       const durationSeconds = Number(durationRaw);
       const speechSeconds = Number(speechRaw);
@@ -445,11 +489,15 @@ export class CallsService {
         transcript = this.transcriptRepo.create({
           callId,
           text,
+          operatorText,
+          abonentText,
           language,
           provider: 'aitunnel',
         });
       } else {
         transcript.text = text;
+        transcript.operatorText = operatorText;
+        transcript.abonentText = abonentText;
         transcript.language = language;
         transcript.provider = 'aitunnel';
       }
@@ -499,6 +547,11 @@ export class CallsService {
       await this.callRepo.save(call);
       if (error instanceof BadRequestException) throw error;
       throw new BadRequestException('Ошибка транскрибации');
+    } finally {
+      if (tempPaths) {
+        await fs.unlink(tempPaths.leftPath).catch(() => {});
+        await fs.unlink(tempPaths.rightPath).catch(() => {});
+      }
     }
   }
 

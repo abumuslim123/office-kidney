@@ -21,6 +21,8 @@ type CallTranscript = {
   id: string;
   callId: string;
   text: string;
+  operatorText?: string | null;
+  abonentText?: string | null;
   language: string | null;
   provider: string;
   createdAt: string;
@@ -596,15 +598,34 @@ export default function Calls() {
                         <td colSpan={7} className="px-4 py-3 bg-gray-50">
                           <div className="text-sm font-medium text-gray-900 mb-2">Транскрипт</div>
                           <div className="space-y-3">
-                            {splitTranscript(call.transcript.text).map((chunk, idx) => (
-                              <div key={`${call.id}-chunk-${idx}`}>
-                                <div className="text-xs font-semibold text-gray-500 mb-1">{chunk.speaker}</div>
-                                <div
-                                  className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed"
-                                  dangerouslySetInnerHTML={{ __html: highlightText(chunk.text, keywords) }}
-                                />
-                              </div>
-                            ))}
+                            {call.transcript.operatorText != null && call.transcript.abonentText != null ? (
+                              <>
+                                <div>
+                                  <div className="text-xs font-semibold text-gray-500 mb-1">Оператор</div>
+                                  <div
+                                    className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed"
+                                    dangerouslySetInnerHTML={{ __html: highlightText(call.transcript.operatorText, keywords) }}
+                                  />
+                                </div>
+                                <div>
+                                  <div className="text-xs font-semibold text-gray-500 mb-1">Собеседник</div>
+                                  <div
+                                    className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed"
+                                    dangerouslySetInnerHTML={{ __html: highlightText(call.transcript.abonentText, keywords) }}
+                                  />
+                                </div>
+                              </>
+                            ) : (
+                              splitTranscript(call.transcript.text).map((chunk, idx) => (
+                                <div key={`${call.id}-chunk-${idx}`}>
+                                  <div className="text-xs font-semibold text-gray-500 mb-1">{chunk.speaker}</div>
+                                  <div
+                                    className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed"
+                                    dangerouslySetInnerHTML={{ __html: highlightText(chunk.text, keywords) }}
+                                  />
+                                </div>
+                              ))
+                            )}
                           </div>
                         </td>
                       </tr>

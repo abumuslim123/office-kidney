@@ -36,7 +36,9 @@
     "pg": "^8.11.3",
     "reflect-metadata": "^0.2.1",
     "rxjs": "^7.8.1",
-    "typeorm": "^0.3.19"
+    "typeorm": "^0.3.19",
+    "wav-decoder": "^1.3.0",
+    "wav-encoder": "^1.3.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.3.0",

@@ -14,6 +14,7 @@ import HrEvents from './pages/HrEvents';
 import HrEventsPublic from './pages/HrEventsPublic';
 import HrListsPublic from './pages/HrListsPublic';
 import Screens from './pages/Screens';
+import ScreensSettings from './pages/ScreensSettings';
 import Calls from './pages/Calls';
 import CallTopics from './pages/CallTopics';
 import CallsSettings from './pages/CallsSettings';
@@ -46,6 +47,7 @@ function App() {
         <Route index element={<Dashboard />} />
         <Route path="users" element={<ProtectedRoute permissions={['users']}><Users /></ProtectedRoute>} />
         <Route path="screens" element={<ProtectedRoute permissions={['screens']}><Screens /></ProtectedRoute>} />
+        <Route path="screens/settings" element={<ProtectedRoute permissions={['screens']}><ScreensSettings /></ProtectedRoute>} />
         <Route path="agents" element={<ProtectedRoute permissions={['agents']}><Agents /></ProtectedRoute>} />
         <Route path="bitrix24" element={<ProtectedRoute permissions={['bitrix24']}><Bitrix24 /></ProtectedRoute>} />
         <Route path="bitrix24/employees" element={<ProtectedRoute permissions={['bitrix24']}><Bitrix24Employees /></ProtectedRoute>} />

@@ -17,6 +17,12 @@ export class CallTranscript {
   @Column({ type: 'text' })
   text: string;
 
+  @Column({ type: 'text', nullable: true })
+  operatorText: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  abonentText: string | null;
+
   @Column({ type: 'varchar', length: 20, nullable: true })
   language: string | null;
 

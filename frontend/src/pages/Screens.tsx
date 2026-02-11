@@ -1,4 +1,5 @@
 import { useEffect, useState, Fragment } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 
 type ScreenRow = {
@@ -28,7 +29,6 @@ export default function Screens() {
   const [screens, setScreens] = useState<ScreenRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [defaultPhotoDurationSeconds, setDefaultPhotoDurationSeconds] = useState<number>(15);
-  const [savingDefaultDuration, setSavingDefaultDuration] = useState(false);
   const [editScreen, setEditScreen] = useState<ScreenRow | null>(null);
   const [editName, setEditName] = useState('');
   const [editError, setEditError] = useState('');
@@ -88,21 +88,6 @@ export default function Screens() {
       })
       .catch(() => {});
   }, []);
-
-  const saveDefaultDuration = async () => {
-    setSavingDefaultDuration(true);
-    try {
-      const res = await api.put<{ defaultPhotoDurationSeconds: number }>('/screens/settings', {
-        defaultPhotoDurationSeconds,
-      });
-      const v = Number(res.data?.defaultPhotoDurationSeconds);
-      if (Number.isFinite(v) && v > 0) setDefaultPhotoDurationSeconds(v);
-    } catch {
-      setPhotoError('Ошибка сохранения длительности по умолчанию');
-    } finally {
-      setSavingDefaultDuration(false);
-    }
-  };
 
   const loadPhotos = async (screenId: string) => {
     setPhotoLoadingId(screenId);
@@ -297,38 +282,11 @@ export default function Screens() {
 
   return (
     <div>
-      <h2 className="text-xl font-semibold text-gray-900 mb-4">Настройка экранов</h2>
-
-      <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-600">
-        Установите приложение на телевизор и запустите его. После первого запроса телевизор появится в списке ниже. Загрузите видео для экрана — оно будет автоматически воспроизводиться в приложении на ТВ.
-      </div>
-
-      <div className="mb-6 p-4 bg-white border border-gray-200 rounded-lg">
-        <div className="text-sm font-medium text-gray-900 mb-2">Фото: настройки по умолчанию</div>
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="text-xs text-gray-600">
-            Длительность (сек)
-            <input
-              type="number"
-              min={1}
-              max={3600}
-              value={defaultPhotoDurationSeconds}
-              onChange={(e) => setDefaultPhotoDurationSeconds(Number(e.target.value))}
-              className="mt-1 w-40 border border-gray-300 rounded px-2 py-1 text-sm"
-            />
-          </label>
-          <button
-            type="button"
-            onClick={saveDefaultDuration}
-            disabled={savingDefaultDuration}
-            className="px-3 py-1.5 bg-accent text-white rounded text-sm font-medium hover:opacity-90 disabled:opacity-50"
-          >
-            {savingDefaultDuration ? 'Сохранение...' : 'Сохранить'}
-          </button>
-        </div>
-        <div className="mt-2 text-xs text-gray-500">
-          Используется при загрузке новых фото.
-        </div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-semibold text-gray-900">Настройка экранов</h2>
+        <Link to="/screens/settings" className="px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 hover:bg-gray-50">
+          Настройки
+        </Link>
       </div>
 
       <div className="mb-4">

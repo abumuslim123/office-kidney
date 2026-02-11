@@ -10,6 +10,7 @@
 #
 # Команды: status, start, stop, restart, logs (journalctl -u kidney-office -f)
 # Используются scripts/docker-compose-up.sh и docker-compose-down.sh — подойдут и docker-compose, и docker compose.
+# Пересборка на сервере: ./scripts/rebuild.sh
 
 [Unit]
 Description=Kidney Office (frontend, backend, postgres, caddy)

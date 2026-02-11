@@ -87,9 +87,19 @@ SSL уже настроен через **Caddy** в `docker-compose.prod.yml`:
 
 ### 6. Обновление
 
+**Важно:** на продакшене не используйте `docker-compose.yml` (он только для локальной разработки). Пересборка и перезапуск — только через `docker-compose.prod.yml` и `.env.production`, иначе пароль БД и переменные окружения разойдутся.
+
+После обновления кода:
+
 ```bash
 git pull
-docker-compose -f docker/docker-compose.prod.yml --env-file .env.production up -d --build
+./scripts/rebuild.sh
+```
+
+Или явно:
+
+```bash
+docker compose -f docker/docker-compose.prod.yml --env-file .env.production up -d --build
 ```
 
 Миграции БД выполняются при каждом старте backend (только недостающие).

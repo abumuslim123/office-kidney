@@ -63,7 +63,8 @@ npm run frontend:dev
 ```bash
 cd kidney-office
 cp backend/.env.example backend/.env
-# Заполнить JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, FRONTEND_URL
+cp .env.example .env
+# Заполнить JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, FRONTEND_URL в backend/.env
 docker-compose -f docker/docker-compose.yml up -d
 ```
 
