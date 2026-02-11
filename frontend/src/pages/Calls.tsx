@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -23,6 +23,7 @@ type CallTranscript = {
   text: string;
   operatorText?: string | null;
   abonentText?: string | null;
+  turns?: { speaker: string; text: string }[] | null;
   language: string | null;
   provider: string;
   createdAt: string;
@@ -37,6 +38,7 @@ type CallRow = {
   durationSeconds: number;
   speechDurationSeconds: number;
   silenceDurationSeconds: number;
+  audioPath: string;
   status: string;
   transcript: CallTranscript | null;
   matches: CallMatch[];
@@ -140,6 +142,8 @@ export default function Calls() {
   const [uploading, setUploading] = useState(false);
   const [transcribingId, setTranscribingId] = useState<string | null>(null);
   const [expandedCallId, setExpandedCallId] = useState<string | null>(null);
+  const [playingCallId, setPlayingCallId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement>(new Audio());
 
   const [filterFrom, setFilterFrom] = useState('');
   const [filterTo, setFilterTo] = useState('');
@@ -213,6 +217,18 @@ export default function Calls() {
     loadData(Object.keys(params).length ? params : undefined);
   }, []);
 
+  useEffect(() => {
+    const audio = audioRef.current;
+    const handleEnded = () => setPlayingCallId(null);
+    const handleError = () => setPlayingCallId(null);
+    audio.addEventListener('ended', handleEnded);
+    audio.addEventListener('error', handleError);
+    return () => {
+      audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('error', handleError);
+    };
+  }, []);
+
   const applyFilters = async () => {
     await loadData();
   };
@@ -281,6 +297,34 @@ export default function Calls() {
         ? (err as { response?: { data?: { message?: string } } }).response?.data
         : null;
       setError((data?.message as string) || 'Ошибка удаления аудио');
+    }
+  };
+
+  const handlePlayAudio = async (callId: string, audioUrl: string) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (playingCallId === callId) {
+      if (!audio.paused) {
+        audio.pause();
+        setPlayingCallId(null);
+      } else {
+        try {
+          await audio.play();
+          setPlayingCallId(callId);
+        } catch {
+          setPlayingCallId(null);
+        }
+      }
+      return;
+    }
+    try {
+      audio.pause();
+      audio.src = audioUrl;
+      audio.currentTime = 0;
+      await audio.play();
+      setPlayingCallId(callId);
+    } catch {
+      setPlayingCallId(null);
     }
   };
 
@@ -529,7 +573,13 @@ export default function Calls() {
                 const keywords = call.matches.map((m) => m.keyword);
                 const audioUrl = `${apiBase}/calls/${call.id}/audio`;
                 const isExpanded = expandedCallId === call.id;
-                const hasAudio = call.status !== 'no_audio';
+                const hasAudio = Boolean(call.audioPath);
+                const groupedTopics = call.matches.reduce((acc, m) => {
+                  const list = acc.get(m.topicName) || [];
+                  list.push(m);
+                  acc.set(m.topicName, list);
+                  return acc;
+                }, new Map<string, CallMatch[]>());
                 return (
                   <Fragment key={call.id}>
                     <tr className="align-top">
@@ -579,6 +629,13 @@ export default function Calls() {
                         </button>
                       {hasAudio && (
                         <>
+                          <button
+                            type="button"
+                            onClick={() => handlePlayAudio(call.id, audioUrl)}
+                            className="text-accent hover:underline"
+                          >
+                            {playingCallId === call.id ? 'Пауза' : 'Плей'}
+                          </button>
                           <a href={audioUrl} download className="text-accent hover:underline">
                             Аудио
                           </a>
@@ -596,36 +653,86 @@ export default function Calls() {
                     {isExpanded && call.transcript?.text && (
                       <tr>
                         <td colSpan={7} className="px-4 py-3 bg-gray-50">
-                          <div className="text-sm font-medium text-gray-900 mb-2">Транскрипт</div>
-                          <div className="space-y-3">
-                            {call.transcript.operatorText != null && call.transcript.abonentText != null ? (
-                              <>
-                                <div>
-                                  <div className="text-xs font-semibold text-gray-500 mb-1">Оператор</div>
-                                  <div
-                                    className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed"
-                                    dangerouslySetInnerHTML={{ __html: highlightText(call.transcript.operatorText, keywords) }}
-                                  />
-                                </div>
-                                <div>
-                                  <div className="text-xs font-semibold text-gray-500 mb-1">Собеседник</div>
-                                  <div
-                                    className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed"
-                                    dangerouslySetInnerHTML={{ __html: highlightText(call.transcript.abonentText, keywords) }}
-                                  />
-                                </div>
-                              </>
-                            ) : (
-                              splitTranscript(call.transcript.text).map((chunk, idx) => (
-                                <div key={`${call.id}-chunk-${idx}`}>
-                                  <div className="text-xs font-semibold text-gray-500 mb-1">{chunk.speaker}</div>
-                                  <div
-                                    className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed"
-                                    dangerouslySetInnerHTML={{ __html: highlightText(chunk.text, keywords) }}
-                                  />
-                                </div>
-                              ))
-                            )}
+                          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px] gap-4">
+                            <div>
+                              <div className="text-sm font-medium text-gray-900 mb-2">Диалог</div>
+                              <div className="space-y-3">
+                                {call.transcript.turns && call.transcript.turns.length > 0 ? (
+                                  <div className="flex flex-col gap-2 max-w-2xl">
+                                    {call.transcript.turns.map((turn, idx) => (
+                                      <div
+                                        key={`${call.id}-turn-${idx}`}
+                                        className={`flex ${turn.speaker === 'operator' ? 'justify-start' : 'justify-end'}`}
+                                      >
+                                        <div
+                                          className={`max-w-[85%] rounded-lg px-3 py-2 ${
+                                            turn.speaker === 'operator'
+                                              ? 'bg-gray-200 text-gray-900'
+                                              : 'bg-accent text-white'
+                                          }`}
+                                        >
+                                          <div className="text-xs font-semibold opacity-80 mb-0.5">
+                                            {turn.speaker === 'operator' ? 'Оператор' : 'Собеседник'}
+                                          </div>
+                                          <div
+                                            className="text-sm whitespace-pre-wrap leading-relaxed"
+                                            dangerouslySetInnerHTML={{ __html: highlightText(turn.text, keywords) }}
+                                          />
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : call.transcript.operatorText != null && call.transcript.abonentText != null ? (
+                                  <>
+                                    <div>
+                                      <div className="text-xs font-semibold text-gray-500 mb-1">Оператор</div>
+                                      <div
+                                        className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed"
+                                        dangerouslySetInnerHTML={{ __html: highlightText(call.transcript.operatorText, keywords) }}
+                                      />
+                                    </div>
+                                    <div>
+                                      <div className="text-xs font-semibold text-gray-500 mb-1">Собеседник</div>
+                                      <div
+                                        className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed"
+                                        dangerouslySetInnerHTML={{ __html: highlightText(call.transcript.abonentText, keywords) }}
+                                      />
+                                    </div>
+                                  </>
+                                ) : (
+                                  splitTranscript(call.transcript.text).map((chunk, idx) => (
+                                    <div key={`${call.id}-chunk-${idx}`}>
+                                      <div className="text-xs font-semibold text-gray-500 mb-1">{chunk.speaker}</div>
+                                      <div
+                                        className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed"
+                                        dangerouslySetInnerHTML={{ __html: highlightText(chunk.text, keywords) }}
+                                      />
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-sm font-medium text-gray-900 mb-2">Тематики</div>
+                              <div className="space-y-3">
+                                {groupedTopics.size ? (
+                                  Array.from(groupedTopics.entries()).map(([topicName, items]) => (
+                                    <div key={`${call.id}-topic-${topicName}`}>
+                                      <div className="text-xs font-semibold text-gray-700">{topicName}</div>
+                                      <div className="mt-1 space-y-1">
+                                        {items.map((item, idx) => (
+                                          <div key={`${call.id}-topic-${topicName}-${idx}`} className="text-xs text-gray-600">
+                                            {item.keyword} ({item.occurrences})
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <div className="text-xs text-gray-500">Тематики не найдены</div>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         </td>
                       </tr>

@@ -98,6 +98,33 @@ export class CallsService {
     return matches ? matches.length : 0;
   }
 
+  /** Разбивает текст на фразы по переносам строк и границам предложений, затем чередует оператор/собеседник. */
+  private buildTurnsFromOperatorAbonent(
+    operatorText: string,
+    abonentText: string,
+  ): { speaker: 'operator' | 'abonent'; text: string }[] {
+    const toPhrases = (t: string): string[] => {
+      const byNewlines = t.split(/\r?\n/).flatMap((line) => line.split(/(?<=[.!?])\s+/));
+      return byNewlines.map((s) => s.trim()).filter(Boolean);
+    };
+    const opPhrases = toPhrases(operatorText);
+    const abPhrases = toPhrases(abonentText);
+    const turns: { speaker: 'operator' | 'abonent'; text: string }[] = [];
+    let i = 0;
+    let j = 0;
+    while (i < opPhrases.length || j < abPhrases.length) {
+      if (i < opPhrases.length) {
+        turns.push({ speaker: 'operator', text: opPhrases[i] });
+        i++;
+      }
+      if (j < abPhrases.length) {
+        turns.push({ speaker: 'abonent', text: abPhrases[j] });
+        j++;
+      }
+    }
+    return turns;
+  }
+
   private async getAudioPathByCall(call: Call): Promise<string | null> {
     const stored = call.audioPath;
     if (!stored) return null;
@@ -484,6 +511,11 @@ export class CallsService {
       const speechSeconds = Number(speechRaw);
       const silenceSeconds = Number(silenceRaw);
 
+      const turns =
+        operatorText != null && operatorText !== '' && abonentText != null && abonentText !== ''
+          ? this.buildTurnsFromOperatorAbonent(operatorText, abonentText)
+          : null;
+
       let transcript = await this.transcriptRepo.findOne({ where: { callId } });
       if (!transcript) {
         transcript = this.transcriptRepo.create({
@@ -491,6 +523,7 @@ export class CallsService {
           text,
           operatorText,
           abonentText,
+          turns,
           language,
           provider: 'aitunnel',
         });
@@ -498,31 +531,35 @@ export class CallsService {
         transcript.text = text;
         transcript.operatorText = operatorText;
         transcript.abonentText = abonentText;
+        transcript.turns = turns;
         transcript.language = language;
         transcript.provider = 'aitunnel';
       }
       await this.transcriptRepo.save(transcript);
 
       await this.matchRepo.delete({ callId });
-      const topics = await this.topicRepo.find({ where: { isActive: true } });
       const matchesToSave: Partial<CallTopicMatch>[] = [];
-      topics.forEach((topic) => {
-        (topic.keywords || []).forEach((keyword) => {
-          const trimmed = keyword.trim();
-          if (!trimmed) return;
-          const occurrences = this.countOccurrences(text, trimmed);
-          if (occurrences > 0) {
-            matchesToSave.push({
-              callId,
-              topicId: topic.id,
-              keyword: trimmed,
-              occurrences,
-            });
-          }
+      const operatorSource = operatorText?.trim();
+      if (operatorSource) {
+        const topics = await this.topicRepo.find({ where: { isActive: true } });
+        topics.forEach((topic) => {
+          (topic.keywords || []).forEach((keyword) => {
+            const trimmed = keyword.trim();
+            if (!trimmed) return;
+            const occurrences = this.countOccurrences(operatorSource, trimmed);
+            if (occurrences > 0) {
+              matchesToSave.push({
+                callId,
+                topicId: topic.id,
+                keyword: trimmed,
+                occurrences,
+              });
+            }
+          });
         });
-      });
-      if (matchesToSave.length) {
-        await this.matchRepo.insert(matchesToSave);
+        if (matchesToSave.length) {
+          await this.matchRepo.insert(matchesToSave);
+        }
       }
 
       if (Number.isFinite(durationSeconds) && durationSeconds > 0) {

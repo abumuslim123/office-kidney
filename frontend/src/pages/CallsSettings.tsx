@@ -13,7 +13,7 @@ type CallsSettings = {
 
 const DEFAULT_API_BASE = 'https://api.aitunnel.ru/v1';
 const DEFAULT_AUDIO_PATH = '/audio/transcriptions';
-const DEFAULT_MODELS = ['whisper-1'];
+const DEFAULT_MODELS = ['whisper-1', 'gpt-4o-transcribe-diarize'];
 
 export default function CallsSettings() {
   const { user } = useAuth();

@@ -61,6 +61,9 @@ export class AitunnelAudioService {
     const fileName = originalName || path.basename(filePath) || 'audio.wav';
     form.append('file', fs.createReadStream(filePath), { filename: fileName });
     form.append('model', model);
+    if (model.includes('diarize')) {
+      form.append('chunking_strategy', 'auto');
+    }
 
     try {
       const res = await axios.post(url, form, {

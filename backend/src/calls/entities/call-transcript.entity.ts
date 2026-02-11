@@ -23,6 +23,9 @@ export class CallTranscript {
   @Column({ type: 'text', nullable: true })
   abonentText: string | null;
 
+  @Column({ type: 'jsonb', nullable: true })
+  turns: { speaker: 'operator' | 'abonent'; text: string }[] | null;
+
   @Column({ type: 'varchar', length: 20, nullable: true })
   language: string | null;
 
