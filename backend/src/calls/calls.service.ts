@@ -437,6 +437,11 @@ export class CallsService {
     call.status = 'transcribing';
     await this.callRepo.save(call);
 
+    const model =
+      (await this.getSetting(CALLS_AUDIO_MODEL)) ||
+      (this.config.get<string>('AITUNNEL_AUDIO_MODEL') || '').trim() ||
+      'whisper-1';
+
     const pickText = (r: unknown): string => {
       if (!r || typeof r !== 'object') return '';
       const o = r as Record<string, unknown>;
@@ -449,19 +454,48 @@ export class CallsService {
       const lang = o.language ?? (o.data && typeof o.data === 'object' && (o.data as Record<string, unknown>).language);
       return typeof lang === 'string' ? lang : null;
     };
+    const getDiarizeSegments = (r: unknown): Array<{ speaker: string; text: string }> => {
+      if (!r || typeof r !== 'object') return [];
+      const o = r as Record<string, unknown>;
+      const rawSegments =
+        (o.segments as unknown) ||
+        (o.data && typeof o.data === 'object' && (o.data as Record<string, unknown>).segments) ||
+        (o.result && typeof o.result === 'object' && (o.result as Record<string, unknown>).segments);
+      if (!Array.isArray(rawSegments)) return [];
+      return rawSegments
+        .map((seg) => {
+          if (!seg || typeof seg !== 'object') return null;
+          const s = seg as Record<string, unknown>;
+          const speakerRaw = s.speaker ?? s.spk ?? s.speaker_label ?? s.speaker_id ?? s.speakerId ?? s.label;
+          const textRaw = s.text ?? s.transcript;
+          const speaker = typeof speakerRaw === 'string' ? speakerRaw.trim() : '';
+          const text = typeof textRaw === 'string' ? textRaw.trim() : '';
+          if (!speaker || !text) return null;
+          return { speaker, text };
+        })
+        .filter((seg): seg is { speaker: string; text: string } => Boolean(seg));
+    };
+    const normalizeSpeaker = (raw: string): 'speaker-a' | 'speaker-b' => {
+      const value = raw.toLowerCase();
+      if (value.includes('b') || value.includes('2')) return 'speaker-b';
+      return 'speaker-a';
+    };
 
     let tempPaths: { leftPath: string; rightPath: string } | null = null;
 
     try {
       const isWavOrMp3 = /\.(wav|mp3)$/i.test(audioPath);
-      if (isWavOrMp3) {
+      const diarizeModel = model.includes('diarize');
+      if (isWavOrMp3 && !diarizeModel) {
         tempPaths = await splitStereoAudioToMonoFiles(audioPath);
       }
 
-      let text: string;
+      let text: string = '';
       let operatorText: string | null = null;
       let abonentText: string | null = null;
       let response: unknown;
+
+      let turnsFromDiarize: { speaker: 'speaker-a' | 'speaker-b'; text: string }[] | null = null;
 
       if (tempPaths) {
         const [leftResponse, rightResponse] = await Promise.all([
@@ -480,7 +514,20 @@ export class CallsService {
         response = leftResponse;
       } else {
         response = await this.audioProvider.transcribeAudio(audioPath, path.basename(audioPath));
-        text = pickText(response);
+        if (diarizeModel) {
+          const diarizeSegments = getDiarizeSegments(response);
+          if (diarizeSegments.length) {
+            turnsFromDiarize = diarizeSegments.map((seg) => ({
+              speaker: normalizeSpeaker(seg.speaker),
+              text: seg.text,
+            }));
+            text = turnsFromDiarize.map((seg) => seg.text).join('\n');
+          } else {
+            text = pickText(response);
+          }
+        } else {
+          text = pickText(response);
+        }
         if (!text || typeof text !== 'string') {
           throw new BadRequestException('Не удалось получить текст транскрибации');
         }
@@ -511,8 +558,9 @@ export class CallsService {
       const speechSeconds = Number(speechRaw);
       const silenceSeconds = Number(silenceRaw);
 
-      const turns =
-        operatorText != null && operatorText !== '' && abonentText != null && abonentText !== ''
+      const turns: { speaker: 'operator' | 'abonent' | 'speaker-a' | 'speaker-b'; text: string }[] | null = turnsFromDiarize
+        ? turnsFromDiarize
+        : operatorText != null && operatorText !== '' && abonentText != null && abonentText !== ''
           ? this.buildTurnsFromOperatorAbonent(operatorText, abonentText)
           : null;
 

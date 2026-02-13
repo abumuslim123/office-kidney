@@ -660,19 +660,29 @@ export default function Calls() {
                                 {call.transcript.turns && call.transcript.turns.length > 0 ? (
                                   <div className="flex flex-col gap-2 max-w-2xl">
                                     {call.transcript.turns.map((turn, idx) => (
-                                      <div
+                                  <div
                                         key={`${call.id}-turn-${idx}`}
-                                        className={`flex ${turn.speaker === 'operator' ? 'justify-start' : 'justify-end'}`}
+                                        className={`flex ${
+                                          turn.speaker === 'operator' || turn.speaker === 'speaker-a'
+                                            ? 'justify-start'
+                                            : 'justify-end'
+                                        }`}
                                       >
                                         <div
                                           className={`max-w-[85%] rounded-lg px-3 py-2 ${
-                                            turn.speaker === 'operator'
+                                            turn.speaker === 'operator' || turn.speaker === 'speaker-a'
                                               ? 'bg-gray-200 text-gray-900'
                                               : 'bg-accent text-white'
                                           }`}
                                         >
                                           <div className="text-xs font-semibold opacity-80 mb-0.5">
-                                            {turn.speaker === 'operator' ? 'Оператор' : 'Собеседник'}
+                                            {turn.speaker === 'operator'
+                                              ? 'Оператор'
+                                              : turn.speaker === 'speaker-a'
+                                                ? 'Спикер A'
+                                                : turn.speaker === 'speaker-b'
+                                                  ? 'Спикер B'
+                                                  : 'Собеседник'}
                                           </div>
                                           <div
                                             className="text-sm whitespace-pre-wrap leading-relaxed"

@@ -63,6 +63,7 @@ export class AitunnelAudioService {
     form.append('model', model);
     if (model.includes('diarize')) {
       form.append('chunking_strategy', 'auto');
+      form.append('response_format', 'diarized_json');
     }
 
     try {
