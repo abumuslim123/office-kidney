@@ -10,6 +10,7 @@ type NavItem = {
 const nav: NavItem[] = [
   { to: '/', label: 'Главная' },
   { to: '/calls', label: 'Звонки', permissions: ['calls'] },
+  { to: '/processes', label: 'Процессы', permissions: ['processes_view'] },
   { to: '/agents', label: 'Агенты', permissions: ['agents'] },
   { to: '/bitrix24', label: 'Битрикс24', permissions: ['bitrix24'] },
   { to: '/services', label: 'Сервисы', permissions: ['services'] },

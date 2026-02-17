@@ -18,6 +18,7 @@ import ScreensSettings from './pages/ScreensSettings';
 import Calls from './pages/Calls';
 import CallTopics from './pages/CallTopics';
 import CallsSettings from './pages/CallsSettings';
+import Processes from './pages/Processes';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -53,6 +54,7 @@ function App() {
         <Route path="bitrix24/employees" element={<ProtectedRoute permissions={['bitrix24']}><Bitrix24Employees /></ProtectedRoute>} />
         <Route path="services" element={<ProtectedRoute permissions={['services']}><Services /></ProtectedRoute>} />
         <Route path="calls" element={<ProtectedRoute permissions={['calls']}><Calls /></ProtectedRoute>} />
+        <Route path="processes" element={<ProtectedRoute permissions={['processes_view']}><Processes /></ProtectedRoute>} />
         <Route path="calls/topics" element={<ProtectedRoute permissions={['calls_manage_topics']}><CallTopics /></ProtectedRoute>} />
         <Route path="calls/settings" element={<ProtectedRoute permissions={['calls_settings']}><CallsSettings /></ProtectedRoute>} />
         <Route path="hr" element={<ProtectedRoute permissions={['hr']}><HR /></ProtectedRoute>} />

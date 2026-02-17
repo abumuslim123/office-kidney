@@ -179,6 +179,8 @@ export class UsersService {
       { slug: 'calls_manage_topics', name: 'Тематики звонков' },
       { slug: 'calls_settings', name: 'Настройки звонков' },
       { slug: 'calls_api_key', name: 'API ключ Polza.ai' },
+      { slug: 'processes_view', name: 'Процессы: просмотр' },
+      { slug: 'processes_edit', name: 'Процессы: редактирование' },
     ]);
   }
 }

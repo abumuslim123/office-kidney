@@ -30,6 +30,13 @@ export default function Users() {
   const [passwordUser, setPasswordUser] = useState<UserRow | null>(null);
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '' });
   const [passwordError, setPasswordError] = useState('');
+  const processPerms = permissions.filter((p) => p.slug === 'processes_view' || p.slug === 'processes_edit');
+  const hrPerms = permissions.filter((p) => p.slug === 'hr' || p.slug.startsWith('hr_'));
+  const otherPerms = permissions.filter(
+    (p) =>
+      !hrPerms.some((x) => x.id === p.id) &&
+      !processPerms.some((x) => x.id === p.id),
+  );
 
   const load = async () => {
     setLoading(true);
@@ -226,45 +233,56 @@ export default function Users() {
             </label>
             <div className="pt-2">
               <p className="text-sm font-medium text-gray-700 mb-2">Права доступа:</p>
-              {(() => {
-                const hrPerms = permissions.filter((p) => p.slug === 'hr' || p.slug.startsWith('hr_'));
-                const otherPerms = permissions.filter((p) => p.slug !== 'hr' && !p.slug.startsWith('hr_'));
-                return (
-                  <div className="flex flex-col gap-3">
-                    {hrPerms.length > 0 && (
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1.5">HR</p>
-                        <div className="flex flex-wrap gap-3">
-                          {hrPerms.map((p) => (
-                            <label key={p.id} className="flex items-center gap-1.5 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={form.permissionIds.includes(p.id)}
-                                onChange={() => togglePermission(p.id)}
-                              />
-                              {p.name}
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {otherPerms.length > 0 && (
-                      <div className="flex flex-wrap gap-3">
-                        {otherPerms.map((p) => (
-                          <label key={p.id} className="flex items-center gap-1.5 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={form.permissionIds.includes(p.id)}
-                              onChange={() => togglePermission(p.id)}
-                            />
-                            {p.name}
-                          </label>
-                        ))}
-                      </div>
-                    )}
+              <div className="flex flex-col gap-3">
+                {processPerms.length > 0 && (
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1.5">Процессы</p>
+                    <div className="flex flex-wrap gap-3">
+                      {processPerms.map((p) => (
+                        <label key={p.id} className="flex items-center gap-1.5 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={form.permissionIds.includes(p.id)}
+                            onChange={() => togglePermission(p.id)}
+                          />
+                          {p.name}
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                );
-              })()}
+                )}
+                {hrPerms.length > 0 && (
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1.5">HR</p>
+                    <div className="flex flex-wrap gap-3">
+                      {hrPerms.map((p) => (
+                        <label key={p.id} className="flex items-center gap-1.5 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={form.permissionIds.includes(p.id)}
+                            onChange={() => togglePermission(p.id)}
+                          />
+                          {p.name}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {otherPerms.length > 0 && (
+                  <div className="flex flex-wrap gap-3">
+                    {otherPerms.map((p) => (
+                      <label key={p.id} className="flex items-center gap-1.5 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={form.permissionIds.includes(p.id)}
+                          onChange={() => togglePermission(p.id)}
+                        />
+                        {p.name}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           <button type="submit" className="mt-3 px-4 py-2 bg-accent text-white text-sm rounded hover:bg-accent-hover">
@@ -319,45 +337,56 @@ export default function Users() {
             </label>
             <div className="pt-2">
               <p className="text-sm font-medium text-gray-700 mb-2">Права доступа:</p>
-              {(() => {
-                const hrPerms = permissions.filter((p) => p.slug === 'hr' || p.slug.startsWith('hr_'));
-                const otherPerms = permissions.filter((p) => p.slug !== 'hr' && !p.slug.startsWith('hr_'));
-                return (
-                  <div className="flex flex-col gap-3">
-                    {hrPerms.length > 0 && (
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1.5">HR</p>
-                        <div className="flex flex-wrap gap-3">
-                          {hrPerms.map((p) => (
-                            <label key={p.id} className="flex items-center gap-1.5 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={editForm.permissionIds.includes(p.id)}
-                                onChange={() => toggleEditPermission(p.id)}
-                              />
-                              {p.name}
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {otherPerms.length > 0 && (
-                      <div className="flex flex-wrap gap-3">
-                        {otherPerms.map((p) => (
-                          <label key={p.id} className="flex items-center gap-1.5 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={editForm.permissionIds.includes(p.id)}
-                              onChange={() => toggleEditPermission(p.id)}
-                            />
-                            {p.name}
-                          </label>
-                        ))}
-                      </div>
-                    )}
+              <div className="flex flex-col gap-3">
+                {processPerms.length > 0 && (
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1.5">Процессы</p>
+                    <div className="flex flex-wrap gap-3">
+                      {processPerms.map((p) => (
+                        <label key={p.id} className="flex items-center gap-1.5 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={editForm.permissionIds.includes(p.id)}
+                            onChange={() => toggleEditPermission(p.id)}
+                          />
+                          {p.name}
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                );
-              })()}
+                )}
+                {hrPerms.length > 0 && (
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1.5">HR</p>
+                    <div className="flex flex-wrap gap-3">
+                      {hrPerms.map((p) => (
+                        <label key={p.id} className="flex items-center gap-1.5 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={editForm.permissionIds.includes(p.id)}
+                            onChange={() => toggleEditPermission(p.id)}
+                          />
+                          {p.name}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {otherPerms.length > 0 && (
+                  <div className="flex flex-wrap gap-3">
+                    {otherPerms.map((p) => (
+                      <label key={p.id} className="flex items-center gap-1.5 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={editForm.permissionIds.includes(p.id)}
+                          onChange={() => toggleEditPermission(p.id)}
+                        />
+                        {p.name}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           <div className="mt-3 flex gap-2">
