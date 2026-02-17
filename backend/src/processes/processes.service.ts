@@ -100,6 +100,26 @@ export class ProcessesService {
     await this.departmentsRepo.remove(dep);
   }
 
+  async getDepartmentProcessCount(departmentId: string): Promise<number> {
+    await this.ensureDepartment(departmentId);
+    return this.processesRepo.count({ where: { departmentId } });
+  }
+
+  async moveProcesses(
+    sourceDepartmentId: string,
+    targetDepartmentId: string,
+  ): Promise<void> {
+    await this.ensureDepartment(sourceDepartmentId);
+    await this.ensureDepartment(targetDepartmentId);
+    if (sourceDepartmentId === targetDepartmentId) {
+      throw new BadRequestException('Нельзя перенести процессы в тот же отдел');
+    }
+    await this.processesRepo.update(
+      { departmentId: sourceDepartmentId },
+      { departmentId: targetDepartmentId },
+    );
+  }
+
   async getProcessesByDepartment(departmentId: string) {
     await this.ensureDepartment(departmentId);
     return this.processesRepo.find({
@@ -195,6 +215,22 @@ export class ProcessesService {
     );
     process.currentDescriptionDoc = nextDoc;
     await this.processesRepo.save(process);
+    return this.findProcessById(process.id);
+  }
+
+  async approveProcess(processId: string, currentUser: User) {
+    const process = await this.ensureProcess(processId);
+    const nextVersionNo = await this.getNextVersionNo(processId);
+    await this.versionsRepo.save(
+      this.versionsRepo.create({
+        processId: process.id,
+        version: nextVersionNo,
+        descriptionDoc: process.currentDescriptionDoc,
+        diffData: { changes: [] },
+        diffDataCorrections: [],
+        changedById: currentUser.id,
+      }),
+    );
     return this.findProcessById(process.id);
   }
 
@@ -421,7 +457,13 @@ export class ProcessesService {
     let unusedIdx = 0;
     for (let ni = 0; ni < n; ni++) {
       if (matchedNew.has(ni)) continue;
+      const newNorm = normNext[ni];
       if (unusedIdx < unusedOld.length) {
+        const oldNorm = norm(unusedOld[unusedIdx]);
+        if (!newNorm && !oldNorm) {
+          unusedIdx++;
+          continue;
+        }
         result.push({
           blockIndex: ni,
           changeType: 'modified',
@@ -430,6 +472,7 @@ export class ProcessesService {
         });
         unusedIdx++;
       } else {
+        if (!newNorm) continue;
         result.push({
           blockIndex: ni,
           changeType: 'added',

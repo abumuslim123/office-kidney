@@ -62,6 +62,22 @@ export class ProcessesController {
     return { success: true };
   }
 
+  @Get('departments/:id/process-count')
+  async getDepartmentProcessCount(@Param('id') id: string) {
+    const count = await this.processes.getDepartmentProcessCount(id);
+    return { count };
+  }
+
+  @Put('departments/:id/move-processes')
+  @Permissions('processes_edit')
+  async moveProcesses(
+    @Param('id') id: string,
+    @Body() body: { targetDepartmentId: string },
+  ) {
+    await this.processes.moveProcesses(id, body.targetDepartmentId);
+    return { success: true };
+  }
+
   @Get('departments/:id/items')
   getDepartmentProcesses(@Param('id') id: string) {
     return this.processes.getProcessesByDepartment(id);
@@ -95,6 +111,15 @@ export class ProcessesController {
     @CurrentUser() user: User,
   ) {
     return this.processes.createVersion(processId, dto, user);
+  }
+
+  @Post(':id/approve')
+  @Permissions('processes_edit')
+  approveProcess(
+    @Param('id') processId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.processes.approveProcess(processId, user);
   }
 
   @Delete(':id')

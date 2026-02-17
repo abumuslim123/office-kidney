@@ -5,12 +5,15 @@ import Link from '@tiptap/extension-link';
 import { TextStyle } from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
 import Highlight from '@tiptap/extension-highlight';
+import Underline from '@tiptap/extension-underline';
 import { Table } from '@tiptap/extension-table';
 import TableRow from '@tiptap/extension-table-row';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
 import TextAlign from '@tiptap/extension-text-align';
+import ListKeymap from '@tiptap/extension-list-keymap';
 import { ChangeBlockPlugin, changeBlockKey, BlockChange } from './ChangeBlockPlugin';
+import { IndentParagraph } from './IndentExtension';
 
 export type { BlockChange };
 
@@ -58,12 +61,15 @@ export default function ProcessesEditor({
 
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      StarterKit.configure({ paragraph: false }),
+      IndentParagraph,
       Link.configure({ openOnClick: false, autolink: true }),
       TextStyle,
       Color,
+      Underline,
       Highlight.configure({ multicolor: true }),
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
+      ListKeymap,
       Table.configure({ resizable: true }),
       TableRow,
       TableHeader,
@@ -72,17 +78,6 @@ export default function ProcessesEditor({
     ],
     editable,
     content: incomingDoc,
-    editorProps: {
-      handlePaste: (_view, event) => {
-        const clipboard = event.clipboardData;
-        const html = clipboard?.getData('text/html');
-        if (!html) return false;
-        event.preventDefault();
-        const sanitized = sanitizePastedHtml(html);
-        editor?.commands.insertContent(sanitized);
-        return true;
-      },
-    },
     onUpdate: ({ editor: current }) => {
       if (!onChange) return;
       onChange({
@@ -155,6 +150,7 @@ export default function ProcessesEditor({
           <button type="button" onClick={() => editor.chain().focus().toggleBold().run()} className="px-2 py-1 text-xs border rounded">B</button>
           <button type="button" onClick={() => editor.chain().focus().toggleItalic().run()} className="px-2 py-1 text-xs border rounded">I</button>
           <button type="button" onClick={() => editor.chain().focus().toggleStrike().run()} className="px-2 py-1 text-xs border rounded">S</button>
+          <button type="button" onClick={() => editor.chain().focus().toggleUnderline().run()} className="px-2 py-1 text-xs border rounded underline">U</button>
           <button type="button" onClick={() => editor.chain().focus().toggleHighlight().run()} className="px-2 py-1 text-xs border rounded">HL</button>
           <button type="button" onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} className="px-2 py-1 text-xs border rounded">H2</button>
           <button type="button" onClick={() => editor.chain().focus().toggleBulletList().run()} className="px-2 py-1 text-xs border rounded">•</button>
@@ -224,63 +220,3 @@ function normalizeDoc(doc?: Record<string, unknown> | null): Record<string, unkn
   };
 }
 
-function sanitizePastedHtml(input: string): string {
-  const parser = new DOMParser();
-  const parsed = parser.parseFromString(input, 'text/html');
-  const allowedTags = new Set([
-    'P', 'BR', 'DIV', 'SPAN', 'B', 'STRONG', 'I', 'EM', 'U', 'S',
-    'SUB', 'SUP', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
-    'UL', 'OL', 'LI', 'BLOCKQUOTE', 'A', 'PRE', 'CODE', 'HR',
-    'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD',
-  ]);
-  const allowedStyles = [
-    'font-weight', 'font-style', 'text-decoration', 'color',
-    'background-color', 'text-align', 'font-size',
-    'margin-left', 'padding-left', 'line-height', 'vertical-align',
-  ];
-
-  const walk = (node: Element) => {
-    const children = Array.from(node.children);
-    for (const child of children) {
-      if (!allowedTags.has(child.tagName)) {
-        while (child.firstChild) {
-          child.parentNode?.insertBefore(child.firstChild, child);
-        }
-        child.remove();
-        continue;
-      }
-
-      const attrs = Array.from(child.attributes);
-      for (const attr of attrs) {
-        const name = attr.name.toLowerCase();
-        if (name === 'href' && child.tagName === 'A') continue;
-        if (name === 'colspan' || name === 'rowspan') continue;
-        if (name === 'style') {
-          const style = child.getAttribute('style') || '';
-          const filtered = style
-            .split(';')
-            .map((part) => part.trim())
-            .filter(Boolean)
-            .filter((part) => !part.toLowerCase().startsWith('mso-'))
-            .filter((part) => allowedStyles.some((s) => part.toLowerCase().startsWith(`${s}:`)))
-            .join('; ');
-          if (filtered) child.setAttribute('style', filtered);
-          else child.removeAttribute('style');
-          continue;
-        }
-        child.removeAttribute(attr.name);
-      }
-
-      if (child.tagName === 'A') {
-        const href = child.getAttribute('href') || '';
-        if (!href.startsWith('http://') && !href.startsWith('https://') && !href.startsWith('/')) {
-          child.removeAttribute('href');
-        }
-      }
-      walk(child);
-    }
-  };
-
-  walk(parsed.body);
-  return parsed.body.innerHTML;
-}
