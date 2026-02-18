@@ -367,9 +367,22 @@ export class ProcessesService {
     nextDoc: Record<string, unknown>,
     currentUser: User,
   ): DiffData {
-    const prevBlocks = this.extractBlockTexts(prevDoc);
-    const nextBlocks = this.extractBlockTexts(nextDoc);
+    const prevPm = this.splitHardBreaks(
+      ((prevDoc?.doc as Record<string, unknown>) ?? prevDoc) as Record<string, unknown>,
+    );
+    const nextPm = this.splitHardBreaks(
+      ((nextDoc?.doc as Record<string, unknown>) ?? nextDoc) as Record<string, unknown>,
+    );
+    const prevBlocks = this.extractBlockTexts({ doc: prevPm });
+    const nextBlocks = this.extractBlockTexts({ doc: nextPm });
+
+    console.log('[DIFF] prevBlocks:', prevBlocks.length, prevBlocks.map((b) => b.slice(0, 60)));
+    console.log('[DIFF] nextBlocks:', nextBlocks.length, nextBlocks.map((b) => b.slice(0, 60)));
+
     const blockChanges = this.diffBlocks(prevBlocks, nextBlocks);
+
+    console.log('[DIFF] changes:', blockChanges.length, blockChanges.map((c) => `${c.blockIndex}:${c.changeType}`));
+
     const userName =
       currentUser.displayName || currentUser.login || 'Пользователь';
     const now = new Date().toISOString();
@@ -407,7 +420,10 @@ export class ProcessesService {
     prevBlocks: string[],
     nextBlocks: string[],
   ): Array<{ blockIndex: number; changeType: 'added' | 'modified'; oldText: string; newText: string }> {
-    const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
+    const norm = (s: string) =>
+      s.replace(/[\u200B-\u200D\uFEFF\u00AD\u2060\u2028\u2029]/g, '')
+       .replace(/\s+/g, ' ')
+       .trim();
     const normPrev = prevBlocks.map(norm);
     const normNext = nextBlocks.map(norm);
 
@@ -486,8 +502,49 @@ export class ProcessesService {
 
   private normalizeDoc(doc: Record<string, unknown>): Record<string, unknown> {
     const rawDoc = this.normalizeProseMirrorDoc(doc?.doc);
-    const text = this.extractTextFromProseMirrorDoc(rawDoc);
-    return { doc: rawDoc, text };
+    const splitDoc = this.splitHardBreaks(rawDoc);
+    const text = this.extractTextFromProseMirrorDoc(splitDoc);
+    return { doc: splitDoc, text };
+  }
+
+  private splitHardBreaks(doc: Record<string, unknown>): Record<string, unknown> {
+    const content = Array.isArray((doc as { content?: unknown }).content)
+      ? ((doc as { content: unknown[] }).content as Array<Record<string, unknown>>)
+      : [];
+    const newContent: Record<string, unknown>[] = [];
+    for (const node of content) {
+      if (
+        node?.type === 'paragraph' &&
+        Array.isArray(node.content) &&
+        (node.content as Array<Record<string, unknown>>).some(
+          (child: Record<string, unknown>) => child?.type === 'hardBreak',
+        )
+      ) {
+        const segments = this.splitNodeByHardBreak(node);
+        newContent.push(...segments);
+      } else {
+        newContent.push(node);
+      }
+    }
+    return { ...doc, content: newContent };
+  }
+
+  private splitNodeByHardBreak(
+    paragraph: Record<string, unknown>,
+  ): Array<Record<string, unknown>> {
+    const children = (paragraph.content ?? []) as Array<Record<string, unknown>>;
+    const segments: Array<Array<Record<string, unknown>>> = [[]];
+    for (const child of children) {
+      if (child?.type === 'hardBreak') {
+        segments.push([]);
+      } else {
+        segments[segments.length - 1].push(child);
+      }
+    }
+    const { content: _ignored, ...paraAttrs } = paragraph;
+    return segments
+      .filter((seg) => seg.length > 0)
+      .map((seg) => ({ ...paraAttrs, content: seg }));
   }
 
   private normalizeProseMirrorDoc(input: unknown): Record<string, unknown> {
