@@ -1,5 +1,7 @@
+import { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
+import { ensureProcessPushSubscription } from './lib/processPush';
 import Login from './pages/Login';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
@@ -22,7 +24,13 @@ import Processes from './pages/Processes';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (!user?.permissions?.some((p) => p.slug === 'processes_view')) return;
+    ensureProcessPushSubscription().catch(() => {});
+  }, [isAuthenticated, user?.id, user?.permissions]);
 
   if (isLoading) {
     return (

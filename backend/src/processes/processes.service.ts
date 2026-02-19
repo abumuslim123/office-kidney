@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -7,7 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { CreateProcessDepartmentDto } from './dto/create-process-department.dto';
 import { CreateProcessDto } from './dto/create-process.dto';
@@ -16,9 +17,16 @@ import { UpdateProcessDepartmentDto } from './dto/update-process-department.dto'
 import { UpdateProcessDto } from './dto/update-process.dto';
 import { UpdateVersionCorrectionsDto } from './dto/update-version-corrections.dto';
 import { ProcessAttachment } from './entities/process-attachment.entity';
+import {
+  ProcessActivityActionType,
+  ProcessActivityLog,
+} from './entities/process-activity-log.entity';
 import { ProcessDepartment } from './entities/process-department.entity';
+import { ProcessDepartmentUser } from './entities/process-department-user.entity';
 import { Process } from './entities/process.entity';
+import { ProcessReadState } from './entities/process-read-state.entity';
 import { ProcessVersion } from './entities/process-version.entity';
+import { PushNotificationsService } from './push-notifications.service';
 
 type DiffChange = {
   blockIndex: number;
@@ -44,12 +52,30 @@ export class ProcessesService {
     private versionsRepo: Repository<ProcessVersion>,
     @InjectRepository(ProcessAttachment)
     private attachmentsRepo: Repository<ProcessAttachment>,
+    @InjectRepository(ProcessActivityLog)
+    private activityLogRepo: Repository<ProcessActivityLog>,
+    @InjectRepository(ProcessDepartmentUser)
+    private departmentUsersRepo: Repository<ProcessDepartmentUser>,
+    @InjectRepository(ProcessReadState)
+    private readStateRepo: Repository<ProcessReadState>,
+    @InjectRepository(User)
+    private usersRepo: Repository<User>,
+    private pushNotifications: PushNotificationsService,
   ) {}
 
-  async getDepartmentTree() {
-    const departments = await this.departmentsRepo.find({
+  async getDepartmentTree(currentUser: User) {
+    const allDepartments = await this.departmentsRepo.find({
       order: { name: 'ASC' },
     });
+    const accessSet = await this.getAccessibleDepartmentIds(currentUser);
+    if (accessSet && accessSet.size === 0) {
+      return [];
+    }
+    const visibleSet = accessSet
+      ? this.expandWithAncestors(accessSet, allDepartments)
+      : new Set(allDepartments.map((d) => d.id));
+
+    const departments = allDepartments.filter((d) => visibleSet.has(d.id));
     const byParent = new Map<string, ProcessDepartment[]>();
     for (const dep of departments) {
       const key = dep.parentId ?? 'root';
@@ -57,8 +83,16 @@ export class ProcessesService {
       arr.push(dep);
       byParent.set(key, arr);
     }
+
+    const unreadByDepartment = await this.getUnreadByDepartment(
+      currentUser.id,
+      departments,
+      accessSet,
+    );
+
     const mapNode = (dep: ProcessDepartment): Record<string, unknown> => ({
       ...dep,
+      hasUnread: unreadByDepartment.get(dep.id) ?? false,
       children: (byParent.get(dep.id) ?? []).map(mapNode),
     });
     return (byParent.get('root') ?? []).map(mapNode);
@@ -100,8 +134,9 @@ export class ProcessesService {
     await this.departmentsRepo.remove(dep);
   }
 
-  async getDepartmentProcessCount(departmentId: string): Promise<number> {
+  async getDepartmentProcessCount(departmentId: string, currentUser: User): Promise<number> {
     await this.ensureDepartment(departmentId);
+    await this.assertDepartmentAccessible(currentUser, departmentId);
     return this.processesRepo.count({ where: { departmentId } });
   }
 
@@ -120,13 +155,176 @@ export class ProcessesService {
     );
   }
 
-  async getProcessesByDepartment(departmentId: string) {
+  async getUsersForAssignment() {
+    const users = await this.usersRepo.find({
+      select: ['id', 'login', 'displayName', 'isActive'],
+      where: { isActive: true },
+      order: { displayName: 'ASC' },
+    });
+    return users.map((u) => ({
+      id: u.id,
+      login: u.login,
+      displayName: u.displayName,
+    }));
+  }
+
+  async getDepartmentUsers(departmentId: string) {
     await this.ensureDepartment(departmentId);
-    return this.processesRepo.find({
+    const rows = await this.departmentUsersRepo.find({
+      where: { departmentId },
+      relations: ['user'],
+      order: { createdAt: 'ASC' },
+    });
+    return rows.map((row) => ({
+      id: row.user.id,
+      login: row.user.login,
+      displayName: row.user.displayName,
+    }));
+  }
+
+  async setDepartmentUsers(departmentId: string, userIds: string[]) {
+    await this.ensureDepartment(departmentId);
+    const uniqueIds = Array.from(new Set(userIds));
+    const currentAssignments = await this.departmentUsersRepo.find({
+      where: { departmentId },
+      select: ['userId'],
+    });
+    const currentAssignedSet = new Set(currentAssignments.map((row) => row.userId));
+    const newlyAssignedUserIds = uniqueIds.filter((id) => !currentAssignedSet.has(id));
+    if (uniqueIds.length) {
+      const users = await this.usersRepo.findBy({ id: In(uniqueIds), isActive: true });
+      if (users.length !== uniqueIds.length) {
+        throw new BadRequestException('Некоторые пользователи не найдены или неактивны');
+      }
+    }
+    await this.departmentUsersRepo.delete({ departmentId });
+    if (!uniqueIds.length) return [];
+    await this.departmentUsersRepo.save(
+      uniqueIds.map((userId) =>
+        this.departmentUsersRepo.create({
+          departmentId,
+          userId,
+        }),
+      ),
+    );
+    await this.initializeReadStateForNewDepartmentUsers(
+      departmentId,
+      newlyAssignedUserIds,
+    );
+    return this.getDepartmentUsers(departmentId);
+  }
+
+  getPushPublicKey() {
+    return { publicKey: this.pushNotifications.getPublicKey() };
+  }
+
+  async subscribePush(
+    currentUser: User,
+    payload: {
+      endpoint: string;
+      p256dh: string;
+      auth: string;
+      userAgent?: string | null;
+    },
+  ) {
+    await this.pushNotifications.upsertSubscription({
+      userId: currentUser.id,
+      ...payload,
+    });
+    return { success: true };
+  }
+
+  async unsubscribePush(currentUser: User, endpoint: string) {
+    await this.pushNotifications.removeSubscription(currentUser.id, endpoint);
+    return { success: true };
+  }
+
+  async markProcessAsRead(processId: string, currentUser: User) {
+    return this.acknowledgeLatestVersion(processId, currentUser);
+  }
+
+  async acknowledgeLatestVersion(processId: string, currentUser: User) {
+    const process = await this.ensureProcess(processId);
+    await this.assertDepartmentAccessible(currentUser, process.departmentId);
+    const latest = await this.versionsRepo.findOne({
+      where: { processId },
+      order: { version: 'DESC' },
+      select: ['id', 'version'],
+    });
+    await this.upsertReadState(currentUser.id, processId, latest?.version ?? 0);
+    await this.logProcessActivity({
+      processId,
+      userId: currentUser.id,
+      versionId: latest?.id ?? null,
+      actionType: 'acknowledge_latest',
+      meta: latest?.version
+        ? { version: latest.version }
+        : null,
+    });
+    return { success: true };
+  }
+
+  async getProcessActivity(
+    processId: string,
+    currentUser: User,
+    filters?: { search?: string },
+  ) {
+    const process = await this.ensureProcess(processId);
+    await this.assertDepartmentAccessible(currentUser, process.departmentId);
+    const qb = this.activityLogRepo
+      .createQueryBuilder('log')
+      .leftJoinAndSelect('log.user', 'user')
+      .leftJoinAndSelect('log.version', 'version')
+      .where('log.processId = :processId', { processId })
+      .orderBy('log.createdAt', 'DESC')
+      .take(300);
+
+    const search = filters?.search?.trim();
+    if (search) {
+      qb.andWhere(
+        '(user."displayName" ILIKE :search OR user.login ILIKE :search OR log."actionType" ILIKE :search OR CAST(version.version AS TEXT) ILIKE :search)',
+        { search: `%${search}%` },
+      );
+    }
+
+    const rows = await qb.getMany();
+    return rows.map((row) => ({
+      id: row.id,
+      processId: row.processId,
+      versionId: row.versionId,
+      actionType: row.actionType,
+      createdAt: row.createdAt,
+      meta: row.meta,
+      user: {
+        id: row.user.id,
+        login: row.user.login,
+        displayName: row.user.displayName,
+      },
+      version: row.version
+        ? {
+            id: row.version.id,
+            version: row.version.version,
+          }
+        : null,
+    }));
+  }
+
+  async getProcessesByDepartment(departmentId: string, currentUser: User) {
+    await this.ensureDepartment(departmentId);
+    await this.assertDepartmentAccessible(currentUser, departmentId);
+    const processes = await this.processesRepo.find({
       where: { departmentId },
       relations: ['createdBy'],
       order: { updatedAt: 'DESC' },
     });
+    const unreadMap = await this.getUnreadByProcess(
+      currentUser.id,
+      processes.map((p) => p.id),
+    );
+    return processes.map((process) => ({
+      ...process,
+      hasUnread: unreadMap.get(process.id) ?? false,
+    }));
   }
 
   async createProcess(dto: CreateProcessDto, currentUser: User) {
@@ -149,22 +347,40 @@ export class ProcessesService {
         changedById: currentUser.id,
       }),
     );
+    await this.upsertReadState(currentUser.id, saved.id, 1);
     return this.findProcessById(saved.id);
   }
 
-  async findProcessById(id: string) {
+  async findProcessById(id: string, currentUser?: User) {
     const process = await this.processesRepo.findOne({
       where: { id },
       relations: ['createdBy', 'attachments', 'attachments.uploadedBy', 'department'],
       order: { attachments: { createdAt: 'DESC' } },
     });
     if (!process) throw new NotFoundException('Процесс не найден');
+    if (currentUser) {
+      await this.assertDepartmentAccessible(currentUser, process.departmentId);
+    }
     const latestVersion = await this.versionsRepo.findOne({
       where: { processId: id },
       relations: ['changedBy'],
       order: { version: 'DESC' },
     });
-    return { ...process, latestVersion };
+    const hasUnread = currentUser
+      ? (await this.getUnreadByProcess(currentUser.id, [process.id])).get(process.id) ?? false
+      : false;
+    if (currentUser) {
+      await this.logProcessActivity({
+        processId: process.id,
+        userId: currentUser.id,
+        versionId: latestVersion?.id ?? null,
+        actionType: 'view_process',
+        meta: latestVersion?.version
+          ? { version: latestVersion.version }
+          : null,
+      });
+    }
+    return { ...process, latestVersion, hasUnread };
   }
 
   async updateProcess(id: string, dto: UpdateProcessDto) {
@@ -215,6 +431,18 @@ export class ProcessesService {
     );
     process.currentDescriptionDoc = nextDoc;
     await this.processesRepo.save(process);
+    await this.upsertReadState(currentUser.id, process.id, nextVersion);
+    const recipients = await this.getUsersWithAccessToDepartment(process.departmentId);
+    const recipientIds = recipients.filter((id) => id !== currentUser.id);
+    if (recipientIds.length) {
+      await this.pushNotifications.sendToUsers(recipientIds, {
+        title: `Новая итерация: ${process.title}`,
+        body: `${currentUser.displayName || currentUser.login} обновил(а) процесс`,
+        url: `/processes?processId=${process.id}`,
+        processId: process.id,
+        version: nextVersion,
+      });
+    }
     return this.findProcessById(process.id);
   }
 
@@ -231,6 +459,7 @@ export class ProcessesService {
         changedById: currentUser.id,
       }),
     );
+    await this.upsertReadState(currentUser.id, process.id, nextVersionNo);
     return this.findProcessById(process.id);
   }
 
@@ -244,8 +473,9 @@ export class ProcessesService {
     await this.processesRepo.remove(process);
   }
 
-  async getVersions(processId: string) {
-    await this.ensureProcess(processId);
+  async getVersions(processId: string, currentUser: User) {
+    const process = await this.ensureProcess(processId);
+    await this.assertDepartmentAccessible(currentUser, process.departmentId);
     return this.versionsRepo.find({
       where: { processId },
       relations: ['changedBy'],
@@ -253,13 +483,25 @@ export class ProcessesService {
     });
   }
 
-  async getVersion(processId: string, versionId: string) {
-    await this.ensureProcess(processId);
+  async getVersion(processId: string, versionId: string, currentUser?: User) {
+    const process = await this.ensureProcess(processId);
+    if (currentUser) {
+      await this.assertDepartmentAccessible(currentUser, process.departmentId);
+    }
     const version = await this.versionsRepo.findOne({
       where: { id: versionId, processId },
       relations: ['changedBy'],
     });
     if (!version) throw new NotFoundException('Версия не найдена');
+    if (currentUser) {
+      await this.logProcessActivity({
+        processId,
+        userId: currentUser.id,
+        versionId: version.id,
+        actionType: 'view_version',
+        meta: { version: version.version },
+      });
+    }
     return version;
   }
 
@@ -284,6 +526,7 @@ export class ProcessesService {
         changedById: currentUser.id,
       }),
     );
+    await this.upsertReadState(currentUser.id, processId, nextVersionNo);
     return this.findProcessById(processId);
   }
 
@@ -582,6 +825,295 @@ export class ProcessesService {
     };
     walk(doc);
     return out.join(' ').replace(/\s+/g, ' ').trim();
+  }
+
+  private hasPermission(user: User, slug: string): boolean {
+    return user.permissions?.some((p) => p.slug === slug) ?? false;
+  }
+
+  private async getAccessibleDepartmentIds(currentUser: User): Promise<Set<string> | null> {
+    if (this.hasPermission(currentUser, 'processes_edit')) {
+      return null;
+    }
+    const assignments = await this.departmentUsersRepo.find({
+      where: { userId: currentUser.id },
+      select: ['departmentId'],
+    });
+    if (!assignments.length) return new Set<string>();
+    const allDepartments = await this.departmentsRepo.find({
+      select: ['id', 'parentId'],
+    });
+    const byParent = new Map<string, string[]>();
+    for (const dep of allDepartments) {
+      const key = dep.parentId ?? 'root';
+      const arr = byParent.get(key) ?? [];
+      arr.push(dep.id);
+      byParent.set(key, arr);
+    }
+    const result = new Set<string>();
+    const queue = assignments.map((a) => a.departmentId);
+    while (queue.length) {
+      const id = queue.shift() as string;
+      if (result.has(id)) continue;
+      result.add(id);
+      for (const childId of byParent.get(id) ?? []) {
+        queue.push(childId);
+      }
+    }
+    return result;
+  }
+
+  private expandWithAncestors(
+    initialSet: Set<string>,
+    allDepartments: Array<{ id: string; parentId: string | null }>,
+  ): Set<string> {
+    const byId = new Map(allDepartments.map((d) => [d.id, d]));
+    const result = new Set(initialSet);
+    for (const depId of initialSet) {
+      let cursor = byId.get(depId)?.parentId ?? null;
+      while (cursor) {
+        if (result.has(cursor)) break;
+        result.add(cursor);
+        cursor = byId.get(cursor)?.parentId ?? null;
+      }
+    }
+    return result;
+  }
+
+  private async assertDepartmentAccessible(currentUser: User, departmentId: string): Promise<void> {
+    const accessSet = await this.getAccessibleDepartmentIds(currentUser);
+    if (accessSet && !accessSet.has(departmentId)) {
+      throw new ForbiddenException('Нет доступа к отделу');
+    }
+  }
+
+  private async getLatestVersionByProcess(
+    processIds: string[],
+  ): Promise<Map<string, number>> {
+    if (!processIds.length) return new Map();
+    const rows = await this.versionsRepo
+      .createQueryBuilder('v')
+      .select('v.processId', 'processId')
+      .addSelect('MAX(v.version)', 'version')
+      .where('v.processId IN (:...processIds)', { processIds })
+      .groupBy('v.processId')
+      .getRawMany<{ processId: string; version: string }>();
+    const result = new Map<string, number>();
+    for (const row of rows) {
+      result.set(row.processId, Number(row.version || 0));
+    }
+    return result;
+  }
+
+  private async getReadStateMap(
+    userId: string,
+    processIds: string[],
+  ): Promise<Map<string, number>> {
+    if (!processIds.length) return new Map();
+    const rows = await this.readStateRepo.find({
+      where: { userId, processId: In(processIds) },
+      select: ['processId', 'lastReadVersion'],
+    });
+    return new Map(rows.map((r) => [r.processId, r.lastReadVersion]));
+  }
+
+  private async getUnreadByProcess(
+    userId: string,
+    processIds: string[],
+  ): Promise<Map<string, boolean>> {
+    const latest = await this.getLatestVersionByProcess(processIds);
+    const read = await this.getReadStateMap(userId, processIds);
+    const result = new Map<string, boolean>();
+    for (const processId of processIds) {
+      const latestVersion = latest.get(processId) ?? 0;
+      const lastReadVersion = read.get(processId) ?? 0;
+      result.set(processId, latestVersion > lastReadVersion);
+    }
+    return result;
+  }
+
+  private async getUnreadByDepartment(
+    userId: string,
+    departments: ProcessDepartment[],
+    accessSet: Set<string> | null,
+  ): Promise<Map<string, boolean>> {
+    const departmentIds = accessSet
+      ? Array.from(accessSet)
+      : departments.map((d) => d.id);
+    if (!departmentIds.length) return new Map();
+    const processes = await this.processesRepo.find({
+      where: { departmentId: In(departmentIds) },
+      select: ['id', 'departmentId'],
+    });
+    const unreadByProcess = await this.getUnreadByProcess(
+      userId,
+      processes.map((p) => p.id),
+    );
+    const direct = new Map<string, boolean>();
+    for (const dep of departments) {
+      direct.set(dep.id, false);
+    }
+    for (const process of processes) {
+      if (unreadByProcess.get(process.id)) {
+        direct.set(process.departmentId, true);
+      }
+    }
+    const byParent = new Map<string, ProcessDepartment[]>();
+    for (const dep of departments) {
+      const key = dep.parentId ?? 'root';
+      const arr = byParent.get(key) ?? [];
+      arr.push(dep);
+      byParent.set(key, arr);
+    }
+    const out = new Map<string, boolean>();
+    const walk = (dep: ProcessDepartment): boolean => {
+      const childUnread = (byParent.get(dep.id) ?? []).some(walk);
+      const ownUnread = direct.get(dep.id) ?? false;
+      const hasUnread = ownUnread || childUnread;
+      out.set(dep.id, hasUnread);
+      return hasUnread;
+    };
+    for (const root of byParent.get('root') ?? []) {
+      walk(root);
+    }
+    return out;
+  }
+
+  private async upsertReadState(
+    userId: string,
+    processId: string,
+    version: number,
+  ): Promise<void> {
+    const existing = await this.readStateRepo.findOne({
+      where: { userId, processId },
+    });
+    if (existing) {
+      existing.lastReadVersion = version;
+      await this.readStateRepo.save(existing);
+      return;
+    }
+    await this.readStateRepo.save(
+      this.readStateRepo.create({
+        userId,
+        processId,
+        lastReadVersion: version,
+      }),
+    );
+  }
+
+  private async getUsersWithAccessToDepartment(
+    departmentId: string,
+  ): Promise<string[]> {
+    const allDepartments = await this.departmentsRepo.find({
+      select: ['id', 'parentId'],
+    });
+    const byId = new Map(allDepartments.map((d) => [d.id, d]));
+    const ancestorIds: string[] = [];
+    let cursor: string | null = departmentId;
+    while (cursor) {
+      ancestorIds.push(cursor);
+      cursor = byId.get(cursor)?.parentId ?? null;
+    }
+    const rows = await this.departmentUsersRepo.find({
+      where: { departmentId: In(ancestorIds) },
+      select: ['userId'],
+    });
+    const userIds = Array.from(new Set(rows.map((r) => r.userId)));
+    if (!userIds.length) return [];
+    const activeUsers = await this.usersRepo.find({
+      where: {
+        id: In(userIds),
+        isActive: true,
+      },
+      select: ['id'],
+    });
+    return activeUsers.map((u) => u.id);
+  }
+
+  private async getDepartmentAndDescendantIds(departmentId: string): Promise<string[]> {
+    const allDepartments = await this.departmentsRepo.find({
+      select: ['id', 'parentId'],
+    });
+    const byParent = new Map<string, string[]>();
+    for (const dep of allDepartments) {
+      const key = dep.parentId ?? 'root';
+      const arr = byParent.get(key) ?? [];
+      arr.push(dep.id);
+      byParent.set(key, arr);
+    }
+    const result = new Set<string>();
+    const queue = [departmentId];
+    while (queue.length) {
+      const current = queue.shift() as string;
+      if (result.has(current)) continue;
+      result.add(current);
+      for (const childId of byParent.get(current) ?? []) {
+        queue.push(childId);
+      }
+    }
+    return Array.from(result);
+  }
+
+  private async initializeReadStateForNewDepartmentUsers(
+    departmentId: string,
+    userIds: string[],
+  ): Promise<void> {
+    if (!userIds.length) return;
+    const departmentIds = await this.getDepartmentAndDescendantIds(departmentId);
+    if (!departmentIds.length) return;
+    const processes = await this.processesRepo.find({
+      where: { departmentId: In(departmentIds) },
+      select: ['id'],
+    });
+    const processIds = processes.map((p) => p.id);
+    if (!processIds.length) return;
+
+    const latestVersions = await this.getLatestVersionByProcess(processIds);
+    const existingStateRows = await this.readStateRepo.find({
+      where: {
+        userId: In(userIds),
+        processId: In(processIds),
+      },
+      select: ['userId', 'processId'],
+    });
+    const existingPairs = new Set(
+      existingStateRows.map((row) => `${row.userId}:${row.processId}`),
+    );
+
+    const rowsToCreate: ProcessReadState[] = [];
+    for (const userId of userIds) {
+      for (const processId of processIds) {
+        const pairKey = `${userId}:${processId}`;
+        if (existingPairs.has(pairKey)) continue;
+        rowsToCreate.push(
+          this.readStateRepo.create({
+            userId,
+            processId,
+            lastReadVersion: latestVersions.get(processId) ?? 0,
+          }),
+        );
+      }
+    }
+    if (!rowsToCreate.length) return;
+    await this.readStateRepo.save(rowsToCreate);
+  }
+
+  private async logProcessActivity(params: {
+    processId: string;
+    userId: string;
+    versionId?: string | null;
+    actionType: ProcessActivityActionType;
+    meta?: Record<string, unknown> | null;
+  }): Promise<void> {
+    await this.activityLogRepo.save(
+      this.activityLogRepo.create({
+        processId: params.processId,
+        userId: params.userId,
+        versionId: params.versionId ?? null,
+        actionType: params.actionType,
+        meta: params.meta ?? null,
+      }),
+    );
   }
 
   private async ensureDepartment(id: string): Promise<ProcessDepartment> {

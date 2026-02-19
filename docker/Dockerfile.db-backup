@@ -1,0 +1,8 @@
+FROM postgres:16-alpine
+
+RUN apk add --no-cache tzdata
+
+COPY scripts/backup-db.sh /usr/local/bin/backup-db.sh
+RUN chmod +x /usr/local/bin/backup-db.sh
+
+CMD ["sh", "-ec", "mkdir -p /backups /var/log && echo \"${DB_BACKUP_CRON:-0 0 * * *} /usr/local/bin/backup-db.sh >> /var/log/db-backup.log 2>&1\" > /etc/crontabs/root && echo \"[db-backup] schedule: ${DB_BACKUP_CRON:-0 0 * * *}\" && crond -f -l 8"]

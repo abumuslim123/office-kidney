@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   Res,
   UploadedFile,
   UseGuards,
@@ -24,6 +25,9 @@ import { ApplyVersionDto } from './dto/apply-version.dto';
 import { CreateProcessDepartmentDto } from './dto/create-process-department.dto';
 import { CreateProcessDto } from './dto/create-process.dto';
 import { CreateVersionDto } from './dto/create-version.dto';
+import { PushSubscribeDto } from './dto/push-subscribe.dto';
+import { PushUnsubscribeDto } from './dto/push-unsubscribe.dto';
+import { SetDepartmentUsersDto } from './dto/set-department-users.dto';
 import { UpdateProcessDepartmentDto } from './dto/update-process-department.dto';
 import { UpdateProcessDto } from './dto/update-process.dto';
 import { UpdateVersionCorrectionsDto } from './dto/update-version-corrections.dto';
@@ -36,8 +40,49 @@ export class ProcessesController {
   constructor(private readonly processes: ProcessesService) {}
 
   @Get('departments')
-  getDepartmentTree() {
-    return this.processes.getDepartmentTree();
+  getDepartmentTree(@CurrentUser() user: User) {
+    return this.processes.getDepartmentTree(user);
+  }
+
+  @Get('users/candidates')
+  @Permissions('processes_edit')
+  getUsersForAssignment() {
+    return this.processes.getUsersForAssignment();
+  }
+
+  @Get('push/public-key')
+  getPushPublicKey() {
+    return this.processes.getPushPublicKey();
+  }
+
+  @Post('push/subscribe')
+  subscribePush(@CurrentUser() user: User, @Body() dto: PushSubscribeDto) {
+    return this.processes.subscribePush(user, {
+      endpoint: dto.endpoint,
+      p256dh: dto.keys.p256dh,
+      auth: dto.keys.auth,
+      userAgent: dto.userAgent,
+    });
+  }
+
+  @Post('push/unsubscribe')
+  unsubscribePush(@CurrentUser() user: User, @Body() dto: PushUnsubscribeDto) {
+    return this.processes.unsubscribePush(user, dto.endpoint);
+  }
+
+  @Get('departments/:id/users')
+  @Permissions('processes_edit')
+  getDepartmentUsers(@Param('id') id: string) {
+    return this.processes.getDepartmentUsers(id);
+  }
+
+  @Put('departments/:id/users')
+  @Permissions('processes_edit')
+  setDepartmentUsers(
+    @Param('id') id: string,
+    @Body() dto: SetDepartmentUsersDto,
+  ) {
+    return this.processes.setDepartmentUsers(id, dto.userIds);
   }
 
   @Post('departments')
@@ -63,8 +108,8 @@ export class ProcessesController {
   }
 
   @Get('departments/:id/process-count')
-  async getDepartmentProcessCount(@Param('id') id: string) {
-    const count = await this.processes.getDepartmentProcessCount(id);
+  async getDepartmentProcessCount(@Param('id') id: string, @CurrentUser() user: User) {
+    const count = await this.processes.getDepartmentProcessCount(id, user);
     return { count };
   }
 
@@ -79,8 +124,8 @@ export class ProcessesController {
   }
 
   @Get('departments/:id/items')
-  getDepartmentProcesses(@Param('id') id: string) {
-    return this.processes.getProcessesByDepartment(id);
+  getDepartmentProcesses(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.processes.getProcessesByDepartment(id, user);
   }
 
   @Post()
@@ -90,8 +135,8 @@ export class ProcessesController {
   }
 
   @Get(':id')
-  getProcess(@Param('id') id: string) {
-    return this.processes.findProcessById(id);
+  getProcess(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.processes.findProcessById(id, user);
   }
 
   @Put(':id')
@@ -122,6 +167,31 @@ export class ProcessesController {
     return this.processes.approveProcess(processId, user);
   }
 
+  @Post(':id/read')
+  markProcessAsRead(
+    @Param('id') processId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.processes.markProcessAsRead(processId, user);
+  }
+
+  @Post(':id/acknowledge')
+  acknowledgeLatestVersion(
+    @Param('id') processId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.processes.acknowledgeLatestVersion(processId, user);
+  }
+
+  @Get(':id/activity')
+  getProcessActivity(
+    @Param('id') processId: string,
+    @Query('search') search: string | undefined,
+    @CurrentUser() user: User,
+  ) {
+    return this.processes.getProcessActivity(processId, user, { search });
+  }
+
   @Delete(':id')
   @Permissions('processes_edit')
   async deleteProcess(@Param('id') id: string) {
@@ -130,16 +200,17 @@ export class ProcessesController {
   }
 
   @Get(':id/versions')
-  getVersions(@Param('id') processId: string) {
-    return this.processes.getVersions(processId);
+  getVersions(@Param('id') processId: string, @CurrentUser() user: User) {
+    return this.processes.getVersions(processId, user);
   }
 
   @Get(':id/versions/:versionId')
   getVersion(
     @Param('id') processId: string,
     @Param('versionId') versionId: string,
+    @CurrentUser() user: User,
   ) {
-    return this.processes.getVersion(processId, versionId);
+    return this.processes.getVersion(processId, versionId, user);
   }
 
   @Post(':id/versions/apply')

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import ProcessesEditor, { BlockChange } from '../components/processes/ProcessesEditor';
@@ -7,6 +8,7 @@ type ProcessDepartmentNode = {
   id: string;
   name: string;
   parentId: string | null;
+  hasUnread?: boolean;
   children: ProcessDepartmentNode[];
 };
 
@@ -15,6 +17,7 @@ type ProcessItem = {
   title: string;
   createdAt: string;
   updatedAt: string;
+  hasUnread?: boolean;
 };
 
 type ProcessVersion = {
@@ -27,11 +30,38 @@ type ProcessVersion = {
 
 type ProcessDetails = {
   id: string;
+  departmentId: string;
   title: string;
   createdAt: string;
   updatedAt: string;
+  hasUnread?: boolean;
   currentDescriptionDoc: { doc?: Record<string, unknown>; text?: string };
+  department?: { id: string; name: string; parentId: string | null };
   latestVersion: ProcessVersion | null;
+};
+
+type ProcessActivityItem = {
+  id: string;
+  processId: string;
+  versionId: string | null;
+  actionType: 'view_process' | 'view_version' | 'acknowledge_latest';
+  createdAt: string;
+  meta: Record<string, unknown> | null;
+  user: {
+    id: string;
+    login: string;
+    displayName: string;
+  };
+  version: {
+    id: string;
+    version: number;
+  } | null;
+};
+
+type AssignableUser = {
+  id: string;
+  login: string;
+  displayName: string;
 };
 
 function formatDate(value?: string): string {
@@ -39,8 +69,23 @@ function formatDate(value?: string): string {
   return new Date(value).toLocaleString('ru-RU');
 }
 
+function getActivityActionText(item: ProcessActivityItem): string {
+  if (item.actionType === 'view_process') {
+    return 'Просмотрел процесс';
+  }
+  if (item.actionType === 'view_version') {
+    const version = item.version?.version;
+    return version ? `Просмотрел итерацию #${version}` : 'Просмотрел итерацию';
+  }
+  const version = item.version?.version;
+  return version
+    ? `Нажал «Ознакомился» с итерацией #${version}`
+    : 'Нажал «Ознакомился»';
+}
+
 export default function Processes() {
   const { user } = useAuth();
+  const location = useLocation();
   const canEdit = useMemo(
     () => user?.permissions?.some((p) => p.slug === 'processes_edit') ?? false,
     [user],
@@ -53,6 +98,10 @@ export default function Processes() {
   const [selectedProcess, setSelectedProcess] = useState<ProcessDetails | null>(null);
   const [versions, setVersions] = useState<ProcessVersion[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [showActivityHistory, setShowActivityHistory] = useState(false);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityItems, setActivityItems] = useState<ProcessActivityItem[]>([]);
+  const [activitySearch, setActivitySearch] = useState('');
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [departmentForm, setDepartmentForm] = useState({ name: '', parentId: '' });
   const [showProcessForm, setShowProcessForm] = useState(false);
@@ -63,6 +112,7 @@ export default function Processes() {
   const [isIterationMode, setIsIterationMode] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [acknowledging, setAcknowledging] = useState(false);
   const [creatingProcess, setCreatingProcess] = useState(false);
   const [deleteDepartmentModal, setDeleteDepartmentModal] = useState<{
     id: string;
@@ -70,6 +120,14 @@ export default function Processes() {
   } | null>(null);
   const [moveToDepartmentId, setMoveToDepartmentId] = useState('');
   const [originalTitle, setOriginalTitle] = useState('');
+  const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
+  const [editDepartmentModal, setEditDepartmentModal] = useState<{
+    id: string;
+    name: string;
+    parentId: string;
+    userIds: string[];
+  } | null>(null);
+  const [savingDepartmentEdit, setSavingDepartmentEdit] = useState(false);
 
   const selectedVersion = versions.find((v) => v.id === selectedVersionId) ?? null;
   const hasChanges = (selectedProcess?.latestVersion?.diffData?.changes?.length ?? 0) > 0;
@@ -94,6 +152,7 @@ export default function Processes() {
       api.get<ProcessVersion[]>(`/processes/${processId}/versions`),
     ]);
     setSelectedProcess(detailsRes.data);
+    setSelectedDepartmentId(detailsRes.data.departmentId);
     setOriginalTitle(detailsRes.data.title);
     setEditDocDraft(detailsRes.data.currentDescriptionDoc?.doc ?? null);
     setIterationDocDraft(null);
@@ -114,6 +173,62 @@ export default function Processes() {
     loadItems(selectedDepartmentId).catch(() => setError('Не удалось загрузить процессы отдела'));
   }, [selectedDepartmentId]);
 
+  const loadAssignableUsers = async () => {
+    if (!canEdit) return;
+    const res = await api.get<AssignableUser[]>('/processes/users/candidates');
+    setAssignableUsers(res.data);
+  };
+
+  useEffect(() => {
+    if (!canEdit) return;
+    loadAssignableUsers().catch(() => setError('Не удалось загрузить пользователей'));
+  }, [canEdit]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const processId = params.get('processId');
+    if (!processId) return;
+    if (selectedProcess?.id === processId) return;
+    loadProcess(processId).catch(() => setError('Не удалось открыть процесс из уведомления'));
+  }, [location.search]);
+
+  useEffect(() => {
+    if (!selectedDepartmentId) return;
+    let cancelled = false;
+
+    const refreshUnreadIndicators = async () => {
+      if (cancelled || document.hidden) return;
+      try {
+        await Promise.all([loadDepartments(), loadItems(selectedDepartmentId)]);
+      } catch {
+        // Background refresh failures should not break the page state.
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      refreshUnreadIndicators().catch(() => {});
+    }, 20000);
+
+    const handleFocus = () => {
+      refreshUnreadIndicators().catch(() => {});
+    };
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        refreshUnreadIndicators().catch(() => {});
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [selectedDepartmentId]);
+
   const collectDepartmentOptions = (
     nodes: ProcessDepartmentNode[],
     level = 0,
@@ -126,6 +241,69 @@ export default function Processes() {
     return rows;
   };
   const departmentOptions = collectDepartmentOptions(departments);
+
+  const findDepartmentNode = (
+    nodes: ProcessDepartmentNode[],
+    id: string,
+  ): ProcessDepartmentNode | null => {
+    for (const node of nodes) {
+      if (node.id === id) return node;
+      const nested = findDepartmentNode(node.children || [], id);
+      if (nested) return nested;
+    }
+    return null;
+  };
+
+  const openEditDepartment = async (departmentId: string) => {
+    if (!canEdit) return;
+    const dep = findDepartmentNode(departments, departmentId);
+    if (!dep) return;
+    try {
+      if (!assignableUsers.length) {
+        await loadAssignableUsers();
+      }
+      const usersRes = await api.get<AssignableUser[]>(
+        `/processes/departments/${departmentId}/users`,
+      );
+      setEditDepartmentModal({
+        id: dep.id,
+        name: dep.name,
+        parentId: dep.parentId ?? '',
+        userIds: usersRes.data.map((u) => u.id),
+      });
+    } catch {
+      setError('Не удалось загрузить данные отдела');
+    }
+  };
+
+  const saveDepartmentEdit = async () => {
+    if (!canEdit || !editDepartmentModal) return;
+    if (!editDepartmentModal.name.trim()) {
+      setError('Название отдела не может быть пустым');
+      return;
+    }
+    setSavingDepartmentEdit(true);
+    try {
+      await api.put(`/processes/departments/${editDepartmentModal.id}`, {
+        name: editDepartmentModal.name.trim(),
+        parentId: editDepartmentModal.parentId || null,
+      });
+      await api.put(`/processes/departments/${editDepartmentModal.id}/users`, {
+        userIds: editDepartmentModal.userIds,
+      });
+      await loadDepartments();
+      if (selectedDepartmentId) {
+        await loadItems(selectedDepartmentId);
+      }
+      if (selectedProcess?.departmentId === editDepartmentModal.id) {
+        await loadProcess(selectedProcess.id);
+      }
+      setError('');
+      setEditDepartmentModal(null);
+    } finally {
+      setSavingDepartmentEdit(false);
+    }
+  };
 
   const createDepartment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -241,10 +419,12 @@ export default function Processes() {
     if (!selectedProcess || !canEdit || !isIterationMode) return;
     setSaving(true);
     try {
+      const processId = selectedProcess.id;
+      const departmentId = selectedProcess.departmentId;
       await api.post(`/processes/${selectedProcess.id}/versions`, {
         descriptionDoc: { doc: iterationDocDraft ?? undefined },
       });
-      await loadProcess(selectedProcess.id);
+      await Promise.all([loadProcess(processId), loadDepartments(), loadItems(departmentId)]);
       setIsIterationMode(false);
       setIterationDocDraft(null);
     } finally {
@@ -280,6 +460,80 @@ export default function Processes() {
       versionId: selectedVersion.id,
     });
     await loadProcess(selectedProcess.id);
+  };
+
+  const openVersionInHistory = async (versionId: string) => {
+    if (!selectedProcess) return;
+    setSelectedVersionId(versionId);
+    try {
+      const res = await api.get<ProcessVersion>(
+        `/processes/${selectedProcess.id}/versions/${versionId}`,
+      );
+      setVersions((prev) =>
+        prev.map((v) => (v.id === versionId ? { ...v, ...res.data } : v)),
+      );
+    } catch {
+      setError('Не удалось открыть итерацию');
+    }
+  };
+
+  const openActivityHistory = async () => {
+    if (!selectedProcess) return;
+    setShowActivityHistory(true);
+    setActivityLoading(true);
+    try {
+      const query = activitySearch.trim();
+      const qs = query ? `?search=${encodeURIComponent(query)}` : '';
+      const res = await api.get<ProcessActivityItem[]>(
+        `/processes/${selectedProcess.id}/activity${qs}`,
+      );
+      setActivityItems(res.data);
+    } catch {
+      setError('Не удалось загрузить общую историю');
+      setActivityItems([]);
+    } finally {
+      setActivityLoading(false);
+    }
+  };
+
+  const resetActivitySearch = async () => {
+    setActivitySearch('');
+    if (!selectedProcess) return;
+    setActivityLoading(true);
+    try {
+      const res = await api.get<ProcessActivityItem[]>(
+        `/processes/${selectedProcess.id}/activity`,
+      );
+      setActivityItems(res.data);
+    } catch {
+      setError('Не удалось загрузить общую историю');
+      setActivityItems([]);
+    } finally {
+      setActivityLoading(false);
+    }
+  };
+
+  const acknowledgeProcess = async () => {
+    if (!selectedProcess) return;
+    setAcknowledging(true);
+    try {
+      await api.post(`/processes/${selectedProcess.id}/acknowledge`);
+      await Promise.all([
+        loadProcess(selectedProcess.id),
+        loadDepartments(),
+        loadItems(selectedProcess.departmentId),
+      ]);
+      if (showActivityHistory) {
+        const query = activitySearch.trim();
+        const qs = query ? `?search=${encodeURIComponent(query)}` : '';
+        const historyRes = await api.get<ProcessActivityItem[]>(
+          `/processes/${selectedProcess.id}/activity${qs}`,
+        );
+        setActivityItems(historyRes.data);
+      }
+    } finally {
+      setAcknowledging(false);
+    }
   };
 
   return (
@@ -330,6 +584,7 @@ export default function Processes() {
                 selectedId={selectedDepartmentId}
                 onSelect={setSelectedDepartmentId}
                 canEdit={canEdit}
+                onEdit={openEditDepartment}
                 onDelete={deleteDepartment}
               />
             )}
@@ -360,7 +615,14 @@ export default function Processes() {
                   selectedProcess?.id === item.id ? 'bg-gray-50' : ''
                 }`}
               >
-                <div className="font-medium text-sm text-gray-900">{item.title}</div>
+                <div className="flex items-center gap-2">
+                  <div className="font-medium text-sm text-gray-900">{item.title}</div>
+                  {item.hasUnread && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                      новая итерация
+                    </span>
+                  )}
+                </div>
                 <div className="text-xs text-gray-500">Обновлен: {formatDate(item.updatedAt)}</div>
               </button>
             ))}
@@ -387,6 +649,24 @@ export default function Processes() {
                   <p className="text-xs text-gray-500 mt-1">
                     Дата создания: {formatDate(selectedProcess.createdAt)}
                   </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Отдел: {selectedProcess.department?.name || '—'}{' '}
+                    {selectedProcess.hasUnread ? (
+                      <span className="text-emerald-700 font-medium">• новая итерация</span>
+                    ) : null}
+                  </p>
+                  {selectedProcess.hasUnread && (
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={acknowledgeProcess}
+                        disabled={acknowledging}
+                        className="px-3 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        {acknowledging ? 'Сохранение...' : 'Ознакомился'}
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-1">
                   {canEdit && titleChanged && (
@@ -410,6 +690,17 @@ export default function Processes() {
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
                       <path fillRule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm.75-13a.75.75 0 0 0-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 0 0 0-1.5h-3.25V5Z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openActivityHistory}
+                    className="p-2 text-gray-500 hover:bg-gray-100 rounded"
+                    title="Общая история действий"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                      <path d="M10 3a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2h-7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
+                      <path d="M5.05 5.05A7 7 0 1 1 3 10a1 1 0 1 1 2 0 5 5 0 1 0 1.464-3.536l1.243 1.243A1 1 0 0 1 6 8H3a1 1 0 0 1-1-1V4a1 1 0 1 1 2 0v1.586l1.05-.536Z" />
                     </svg>
                   </button>
                   {canEdit && hasChanges && (
@@ -539,6 +830,111 @@ export default function Processes() {
         </div>
       )}
 
+      {editDepartmentModal && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg border border-gray-200 w-[680px] max-h-[85vh] overflow-hidden flex flex-col">
+            <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+              <h3 className="text-lg font-medium text-gray-900">Редактирование отдела</h3>
+              <button
+                type="button"
+                onClick={() => setEditDepartmentModal(null)}
+                className="text-sm text-gray-500 hover:text-gray-700"
+              >
+                Закрыть
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-5 space-y-4">
+              <div>
+                <label className="text-sm text-gray-700">Название</label>
+                <input
+                  type="text"
+                  value={editDepartmentModal.name}
+                  onChange={(e) =>
+                    setEditDepartmentModal((prev) =>
+                      prev ? { ...prev, name: e.target.value } : prev,
+                    )
+                  }
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-gray-700">Родительский отдел</label>
+                <select
+                  value={editDepartmentModal.parentId}
+                  onChange={(e) =>
+                    setEditDepartmentModal((prev) =>
+                      prev ? { ...prev, parentId: e.target.value } : prev,
+                    )
+                  }
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                >
+                  <option value="">Без родителя</option>
+                  {departmentOptions
+                    .filter((opt) => opt.id !== editDepartmentModal.id)
+                    .map((opt) => (
+                      <option key={opt.id} value={opt.id}>
+                        {opt.label}
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <div>
+                <p className="text-sm text-gray-700 mb-2">Подписка пользователей на итерации</p>
+                <div className="max-h-56 overflow-auto border border-gray-200 rounded p-2 space-y-1">
+                  {assignableUsers.map((u) => {
+                    const checked = editDepartmentModal.userIds.includes(u.id);
+                    return (
+                      <label key={u.id} className="flex items-center gap-2 text-xs text-gray-700">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) =>
+                            setEditDepartmentModal((prev) => {
+                              if (!prev) return prev;
+                              if (e.target.checked) {
+                                return {
+                                  ...prev,
+                                  userIds: Array.from(new Set([...prev.userIds, u.id])),
+                                };
+                              }
+                              return {
+                                ...prev,
+                                userIds: prev.userIds.filter((id) => id !== u.id),
+                              };
+                            })
+                          }
+                        />
+                        <span>{u.displayName || u.login}</span>
+                      </label>
+                    );
+                  })}
+                  {!assignableUsers.length && (
+                    <div className="text-xs text-gray-500">Нет доступных пользователей</div>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="px-5 py-4 border-t border-gray-200 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={saveDepartmentEdit}
+                disabled={savingDepartmentEdit}
+                className="px-4 py-2 bg-accent text-white text-sm rounded hover:bg-accent-hover disabled:opacity-50"
+              >
+                {savingDepartmentEdit ? 'Сохранение...' : 'Сохранить отдел'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditDepartmentModal(null)}
+                className="px-4 py-2 border border-gray-300 text-sm rounded hover:bg-gray-50"
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {deleteDepartmentModal && (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg border border-gray-200 w-[500px] p-6">
@@ -621,7 +1017,7 @@ export default function Processes() {
                   <button
                     key={v.id}
                     type="button"
-                    onClick={() => setSelectedVersionId(v.id)}
+                    onClick={() => openVersionInHistory(v.id)}
                     className={`w-full text-left px-3 py-2 border-b border-gray-100 ${
                       selectedVersionId === v.id ? 'bg-gray-50' : 'hover:bg-gray-50'
                     }`}
@@ -691,6 +1087,65 @@ export default function Processes() {
           </div>
         </div>
       )}
+
+      {showActivityHistory && selectedProcess && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg border border-gray-200 w-[900px] max-h-[85vh] overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+              <h3 className="text-lg font-medium text-gray-900">Общая история действий</h3>
+              <button
+                type="button"
+                onClick={() => setShowActivityHistory(false)}
+                className="text-sm text-gray-500 hover:text-gray-700"
+              >
+                Закрыть
+              </button>
+            </div>
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center gap-2">
+              <input
+                type="text"
+                value={activitySearch}
+                onChange={(e) => setActivitySearch(e.target.value)}
+                placeholder="Поиск по пользователю, действию или версии"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm"
+              />
+              <button
+                type="button"
+                onClick={openActivityHistory}
+                className="px-3 py-2 bg-accent text-white text-sm rounded hover:bg-accent-hover"
+              >
+                Найти
+              </button>
+              <button
+                type="button"
+                onClick={resetActivitySearch}
+                className="px-3 py-2 border border-gray-300 text-sm rounded hover:bg-gray-50"
+              >
+                Сбросить
+              </button>
+            </div>
+            <div className="p-4 max-h-[70vh] overflow-auto">
+              {activityLoading ? (
+                <div className="text-sm text-gray-500">Загрузка истории...</div>
+              ) : !activityItems.length ? (
+                <div className="text-sm text-gray-500">Событий пока нет</div>
+              ) : (
+                <div className="space-y-2">
+                  {activityItems.map((item) => (
+                    <div key={item.id} className="border border-gray-200 rounded p-3">
+                      <div className="text-sm text-gray-900">
+                        {item.user.displayName || item.user.login}
+                      </div>
+                      <div className="text-xs text-gray-700 mt-1">{getActivityActionText(item)}</div>
+                      <div className="text-xs text-gray-500 mt-1">{formatDate(item.createdAt)}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -700,12 +1155,14 @@ function DepartmentTree({
   selectedId,
   onSelect,
   canEdit,
+  onEdit,
   onDelete,
 }: {
   nodes: ProcessDepartmentNode[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   canEdit: boolean;
+  onEdit: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
   return (
@@ -720,16 +1177,32 @@ function DepartmentTree({
                 selectedId === node.id ? 'bg-gray-100 font-medium' : ''
               }`}
             >
-              {node.name}
+              <span className="inline-flex items-center gap-2">
+                <span>{node.name}</span>
+                {node.hasUnread && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                    новая
+                  </span>
+                )}
+              </span>
             </button>
             {canEdit && (
-              <button
-                type="button"
-                onClick={() => onDelete(node.id)}
-                className="text-xs text-red-600 hover:underline"
-              >
-                Удалить
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onEdit(node.id)}
+                  className="text-xs text-gray-600 hover:underline"
+                >
+                  Ред.
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDelete(node.id)}
+                  className="text-xs text-red-600 hover:underline"
+                >
+                  Удалить
+                </button>
+              </div>
             )}
           </div>
           {!!node.children?.length && (
@@ -739,6 +1212,7 @@ function DepartmentTree({
                 selectedId={selectedId}
                 onSelect={onSelect}
                 canEdit={canEdit}
+                onEdit={onEdit}
                 onDelete={onDelete}
               />
             </div>

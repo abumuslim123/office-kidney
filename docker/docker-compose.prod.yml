@@ -74,6 +74,28 @@ services:
         echo "DB role password synced."
     restart: "no"
 
+  db_backup:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.db-backup
+    env_file:
+      - ../.env.production
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${DB_USERNAME}
+      PGPASSWORD: ${DB_PASSWORD}
+      PGDATABASE: ${DB_DATABASE}
+      DB_BACKUP_CRON: ${DB_BACKUP_CRON:-0 0 * * *}
+      DB_BACKUP_RETENTION_DAYS: ${DB_BACKUP_RETENTION_DAYS:-30}
+      DB_BACKUP_DIR: ${DB_BACKUP_DIR:-/backups}
+    volumes:
+      - ${DB_BACKUP_HOST_DIR:-../backups/postgres}:${DB_BACKUP_DIR:-/backups}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   backend:
     build:
       context: ..
