@@ -380,7 +380,10 @@ export class ProcessesService {
           : null,
       });
     }
-    return { ...process, latestVersion, hasUnread };
+    const acknowledgmentStats = currentUser
+      ? await this.getAcknowledgmentStats(id)
+      : { total: 0, acknowledged: 0 };
+    return { ...process, latestVersion, hasUnread, acknowledgmentStats };
   }
 
   async updateProcess(id: string, dto: UpdateProcessDto) {
@@ -418,7 +421,23 @@ export class ProcessesService {
       return this.findProcessById(process.id);
     }
 
-    const diffData = this.buildDiffData(prevDoc, nextDoc, currentUser);
+    const userName = currentUser.displayName || currentUser.login || 'Пользователь';
+    const now = new Date().toISOString();
+    let diffData: DiffData;
+    if (dto.diffData?.changes?.length) {
+      diffData = {
+        changes: dto.diffData.changes.map((c) => ({
+          blockIndex: c.blockIndex,
+          changeType: c.changeType as 'added' | 'modified',
+          oldText: c.oldText ?? '',
+          newText: c.newText ?? '',
+          changedByName: c.changedByName ?? userName,
+          changedAt: c.changedAt ?? now,
+        })),
+      };
+    } else {
+      diffData = this.buildDiffData(prevDoc, nextDoc, currentUser);
+    }
     await this.versionsRepo.save(
       this.versionsRepo.create({
         processId: process.id,
@@ -448,6 +467,24 @@ export class ProcessesService {
 
   async approveProcess(processId: string, currentUser: User) {
     const process = await this.ensureProcess(processId);
+    const latestVersion = await this.versionsRepo.findOne({
+      where: { processId: process.id },
+      order: { version: 'DESC' },
+    });
+    const latestVer = latestVersion?.version ?? 0;
+    const subscriberIds = await this.getUsersWithAccessToDepartment(process.departmentId);
+    if (subscriberIds.length > 0 && latestVer > 0) {
+      const readStates = await this.readStateRepo.find({
+        where: { processId: process.id, userId: In(subscriberIds) },
+        select: ['userId', 'lastReadVersion'],
+      });
+      const acknowledgedCount = readStates.filter((r) => r.lastReadVersion >= latestVer).length;
+      if (acknowledgedCount < subscriberIds.length && !this.canForceApprove(currentUser)) {
+        throw new ForbiddenException(
+          'Утвердить может только администратор или пользователь с правом «Процессы: утверждение»',
+        );
+      }
+    }
     const nextVersionNo = await this.getNextVersionNo(processId);
     await this.versionsRepo.save(
       this.versionsRepo.create({
@@ -460,7 +497,7 @@ export class ProcessesService {
       }),
     );
     await this.upsertReadState(currentUser.id, process.id, nextVersionNo);
-    return this.findProcessById(process.id);
+    return this.findProcessById(process.id, currentUser);
   }
 
   async deleteProcess(id: string): Promise<void> {
@@ -829,6 +866,38 @@ export class ProcessesService {
 
   private hasPermission(user: User, slug: string): boolean {
     return user.permissions?.some((p) => p.slug === slug) ?? false;
+  }
+
+  private canForceApprove(user: User): boolean {
+    return (
+      this.hasPermission(user, 'processes_approve') ||
+      this.hasPermission(user, 'admin') ||
+      user.role?.slug === 'admin'
+    );
+  }
+
+  private async getAcknowledgmentStats(
+    processId: string,
+  ): Promise<{ total: number; acknowledged: number }> {
+    const process = await this.processesRepo.findOne({
+      where: { id: processId },
+      select: ['departmentId'],
+    });
+    if (!process) return { total: 0, acknowledged: 0 };
+    const latestVersion = await this.versionsRepo.findOne({
+      where: { processId },
+      order: { version: 'DESC' },
+      select: ['version'],
+    });
+    const latestVer = latestVersion?.version ?? 0;
+    const subscriberIds = await this.getUsersWithAccessToDepartment(process.departmentId);
+    if (subscriberIds.length === 0) return { total: 0, acknowledged: 0 };
+    const readStates = await this.readStateRepo.find({
+      where: { processId, userId: In(subscriberIds) },
+      select: ['userId', 'lastReadVersion'],
+    });
+    const acknowledged = readStates.filter((r) => r.lastReadVersion >= latestVer).length;
+    return { total: subscriberIds.length, acknowledged };
   }
 
   private async getAccessibleDepartmentIds(currentUser: User): Promise<Set<string> | null> {

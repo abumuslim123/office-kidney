@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import ProcessesEditor, { BlockChange } from '../components/processes/ProcessesEditor';
+import { hasDocTaggedMarks, buildDiffFromTaggedDoc } from '../components/processes/taggedDiffUtils';
 
 type ProcessDepartmentNode = {
   id: string;
@@ -38,6 +39,7 @@ type ProcessDetails = {
   currentDescriptionDoc: { doc?: Record<string, unknown>; text?: string };
   department?: { id: string; name: string; parentId: string | null };
   latestVersion: ProcessVersion | null;
+  acknowledgmentStats?: { total: number; acknowledged: number };
 };
 
 type ProcessActivityItem = {
@@ -90,6 +92,13 @@ export default function Processes() {
     () => user?.permissions?.some((p) => p.slug === 'processes_edit') ?? false,
     [user],
   );
+  const canForceApprove = useMemo(
+    () =>
+      user?.permissions?.some((p) => p.slug === 'processes_approve') ||
+      user?.role === 'admin' ||
+      false,
+    [user],
+  );
 
   const [loading, setLoading] = useState(true);
   const [departments, setDepartments] = useState<ProcessDepartmentNode[]>([]);
@@ -103,6 +112,7 @@ export default function Processes() {
   const [activityItems, setActivityItems] = useState<ProcessActivityItem[]>([]);
   const [activitySearch, setActivitySearch] = useState('');
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  const [compareMode, setCompareMode] = useState(false);
   const [departmentForm, setDepartmentForm] = useState({ name: '', parentId: '' });
   const [showProcessForm, setShowProcessForm] = useState(false);
   const [processTitleDraft, setProcessTitleDraft] = useState('');
@@ -128,10 +138,47 @@ export default function Processes() {
     userIds: string[];
   } | null>(null);
   const [savingDepartmentEdit, setSavingDepartmentEdit] = useState(false);
+  const [titleInputWidth, setTitleInputWidth] = useState(192); // 12rem default
+  const titleMeasureRef = useRef<HTMLSpanElement>(null);
+  const lastActivitySearchRef = useRef<string | undefined>(undefined);
 
   const selectedVersion = versions.find((v) => v.id === selectedVersionId) ?? null;
+  const selectedVersionIndex = selectedVersionId ? versions.findIndex((v) => v.id === selectedVersionId) : -1;
+  const previousVersion =
+    selectedVersionIndex >= 0 && selectedVersionIndex + 1 < versions.length
+      ? versions[selectedVersionIndex + 1]
+      : null;
   const hasChanges = (selectedProcess?.latestVersion?.diffData?.changes?.length ?? 0) > 0;
   const titleChanged = selectedProcess ? selectedProcess.title !== originalTitle : false;
+
+  useLayoutEffect(() => {
+    const w = titleMeasureRef.current?.offsetWidth;
+    if (w != null) setTitleInputWidth(w + 16);
+  }, [selectedProcess?.title]);
+
+  useEffect(() => {
+    if (!showActivityHistory) {
+      lastActivitySearchRef.current = undefined;
+      return;
+    }
+    if (!selectedProcess) return;
+    if (lastActivitySearchRef.current === activitySearch) return;
+    const tid = setTimeout(() => {
+      lastActivitySearchRef.current = activitySearch;
+      setActivityLoading(true);
+      const query = activitySearch.trim();
+      const qs = query ? `?search=${encodeURIComponent(query)}` : '';
+      api
+        .get<ProcessActivityItem[]>(`/processes/${selectedProcess.id}/activity${qs}`)
+        .then((res) => setActivityItems(res.data))
+        .catch(() => {
+          setError('Не удалось загрузить общую историю');
+          setActivityItems([]);
+        })
+        .finally(() => setActivityLoading(false));
+    }, 350);
+    return () => clearTimeout(tid);
+  }, [showActivityHistory, selectedProcess?.id, activitySearch]);
 
   const loadDepartments = async () => {
     const res = await api.get<ProcessDepartmentNode[]>('/processes/departments');
@@ -421,9 +468,19 @@ export default function Processes() {
     try {
       const processId = selectedProcess.id;
       const departmentId = selectedProcess.departmentId;
-      await api.post(`/processes/${selectedProcess.id}/versions`, {
-        descriptionDoc: { doc: iterationDocDraft ?? undefined },
-      });
+      const doc = iterationDocDraft ?? undefined;
+      const body: { descriptionDoc: { doc?: Record<string, unknown> }; diffData?: { changes: BlockChange[] } } = {
+        descriptionDoc: { doc },
+      };
+      if (doc && hasDocTaggedMarks(doc)) {
+        const changes = buildDiffFromTaggedDoc(
+          doc,
+          user?.displayName || user?.login || '',
+          new Date().toISOString(),
+        );
+        if (changes.length) body.diffData = { changes };
+      }
+      await api.post(`/processes/${selectedProcess.id}/versions`, body);
       await Promise.all([loadProcess(processId), loadDepartments(), loadItems(departmentId)]);
       setIsIterationMode(false);
       setIterationDocDraft(null);
@@ -445,10 +502,18 @@ export default function Processes() {
     if (!selectedProcess || !canEdit) return;
     if (!confirm('Утвердить текущий процесс? Подсветка изменений будет снята.')) return;
     setSaving(true);
+    setError('');
     try {
       await api.post(`/processes/${selectedProcess.id}/approve`);
       await loadProcess(selectedProcess.id);
       if (selectedDepartmentId) await loadItems(selectedDepartmentId);
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { status?: number; data?: { message?: string } } })?.response?.status ===
+        403
+          ? 'Утвердить может только администратор или пользователь с правом «Процессы: утверждение».'
+          : 'Не удалось утвердить процесс';
+      setError(msg);
     } finally {
       setSaving(false);
     }
@@ -483,6 +548,7 @@ export default function Processes() {
     setActivityLoading(true);
     try {
       const query = activitySearch.trim();
+      lastActivitySearchRef.current = activitySearch;
       const qs = query ? `?search=${encodeURIComponent(query)}` : '';
       const res = await api.get<ProcessActivityItem[]>(
         `/processes/${selectedProcess.id}/activity${qs}`,
@@ -496,21 +562,8 @@ export default function Processes() {
     }
   };
 
-  const resetActivitySearch = async () => {
+  const resetActivitySearch = () => {
     setActivitySearch('');
-    if (!selectedProcess) return;
-    setActivityLoading(true);
-    try {
-      const res = await api.get<ProcessActivityItem[]>(
-        `/processes/${selectedProcess.id}/activity`,
-      );
-      setActivityItems(res.data);
-    } catch {
-      setError('Не удалось загрузить общую историю');
-      setActivityItems([]);
-    } finally {
-      setActivityLoading(false);
-    }
   };
 
   const acknowledgeProcess = async () => {
@@ -636,14 +689,22 @@ export default function Processes() {
           ) : (
             <div>
               <div className="flex items-start justify-between mb-3">
-                <div>
+                <div className="inline-block relative">
+                  <span
+                    ref={titleMeasureRef}
+                    aria-hidden
+                    className="text-lg font-semibold text-gray-900 invisible absolute left-0 top-0 whitespace-pre pointer-events-none"
+                  >
+                    {selectedProcess.title || '\u00A0'}
+                  </span>
                   <input
                     type="text"
                     value={selectedProcess.title}
                     onChange={(e) =>
                       setSelectedProcess((p) => (p ? { ...p, title: e.target.value } : p))
                     }
-                    className="text-lg font-semibold text-gray-900 border border-gray-300 rounded px-2 py-1"
+                    style={{ width: Math.max(titleInputWidth, 192) }}
+                    className="min-w-[12rem] text-lg font-semibold text-gray-900 border border-gray-300 rounded px-2 py-1 box-border"
                     disabled={!canEdit}
                   />
                   <p className="text-xs text-gray-500 mt-1">
@@ -667,6 +728,27 @@ export default function Processes() {
                       </button>
                     </div>
                   )}
+                  {selectedProcess.acknowledgmentStats &&
+                    selectedProcess.acknowledgmentStats.total > 0 && (
+                      <div className="mt-2">
+                        <div className="text-xs text-gray-600">
+                          Ознакомились: {selectedProcess.acknowledgmentStats.acknowledged} из{' '}
+                          {selectedProcess.acknowledgmentStats.total}
+                        </div>
+                        <div className="mt-1 h-1.5 w-full max-w-xs bg-gray-200 rounded overflow-hidden">
+                          <div
+                            className="h-full bg-emerald-500 rounded"
+                            style={{
+                              width: `${
+                                (selectedProcess.acknowledgmentStats.acknowledged /
+                                  selectedProcess.acknowledgmentStats.total) *
+                                100
+                              }%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
                 </div>
                 <div className="flex items-center gap-1">
                   {canEdit && titleChanged && (
@@ -703,19 +785,27 @@ export default function Processes() {
                       <path d="M5.05 5.05A7 7 0 1 1 3 10a1 1 0 1 1 2 0 5 5 0 1 0 1.464-3.536l1.243 1.243A1 1 0 0 1 6 8H3a1 1 0 0 1-1-1V4a1 1 0 1 1 2 0v1.586l1.05-.536Z" />
                     </svg>
                   </button>
-                  {canEdit && hasChanges && (
-                    <button
-                      type="button"
-                      disabled={saving}
-                      onClick={approveProcess}
-                      className="p-2 text-emerald-500 hover:bg-emerald-50 hover:text-emerald-700 rounded disabled:opacity-50"
-                      title="Утвердить процесс"
-                    >
+                  {canEdit &&
+                    hasChanges &&
+                    (() => {
+                      const stats = selectedProcess.acknowledgmentStats;
+                      const allAcknowledged =
+                        !stats || stats.total === 0 || stats.acknowledged >= stats.total;
+                      const showApprove = allAcknowledged || canForceApprove;
+                      return showApprove ? (
+                        <button
+                          type="button"
+                          disabled={saving}
+                          onClick={approveProcess}
+                          className="p-2 text-emerald-500 hover:bg-emerald-50 hover:text-emerald-700 rounded disabled:opacity-50"
+                          title="Утвердить процесс"
+                        >
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
                         <path fillRule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clipRule="evenodd" />
                       </svg>
-                    </button>
-                  )}
+                        </button>
+                      ) : null;
+                    })()}
                   {canEdit && (
                     <button
                       type="button"
@@ -1000,19 +1090,22 @@ export default function Processes() {
 
       {showHistory && selectedProcess && (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg border border-gray-200 w-[900px] max-h-[85vh] overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+          <div className="bg-white rounded-lg border border-gray-200 w-[80vw] max-w-[1600px] max-h-[85vh] overflow-hidden flex flex-col">
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between shrink-0">
               <h3 className="text-lg font-medium text-gray-900">История версий процесса</h3>
               <button
                 type="button"
-                onClick={() => setShowHistory(false)}
+                onClick={() => {
+                  setShowHistory(false);
+                  setCompareMode(false);
+                }}
                 className="text-sm text-gray-500 hover:text-gray-700"
               >
                 Закрыть
               </button>
             </div>
-            <div className="grid grid-cols-12 h-[70vh]">
-              <div className="col-span-4 border-r border-gray-200 overflow-auto">
+            <div className="grid grid-cols-12 flex-1 min-h-0">
+              <div className="col-span-3 border-r border-gray-200 overflow-auto shrink-0 max-w-[280px]">
                 {versions.map((v) => (
                   <button
                     key={v.id}
@@ -1027,34 +1120,66 @@ export default function Processes() {
                   </button>
                 ))}
               </div>
-              <div className="col-span-8 p-4 overflow-auto">
+              <div className="col-span-9 p-4 overflow-auto min-w-0">
                 {!selectedVersion ? (
                   <div className="text-sm text-gray-500">Выберите версию</div>
                 ) : (
                   <div>
-                    <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                       <div className="text-sm text-gray-600">
                         Версия #{selectedVersion.version} от {formatDate(selectedVersion.changedAt)}
                       </div>
-                      {canEdit && (
-                        <button
-                          type="button"
-                          onClick={applyVersion}
-                          className="px-3 py-2 bg-accent text-white text-sm rounded hover:bg-accent-hover"
-                        >
-                          Применить как актуальную
-                        </button>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {previousVersion && (
+                          <button
+                            type="button"
+                            onClick={() => setCompareMode((m) => !m)}
+                            className={`px-3 py-2 text-sm rounded border ${
+                              compareMode ? 'bg-gray-100 border-gray-400' : 'border-gray-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            {compareMode ? 'Скрыть сравнение' : 'Сравнить с предыдущей'}
+                          </button>
+                        )}
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={applyVersion}
+                            className="px-3 py-2 bg-accent text-white text-sm rounded hover:bg-accent-hover"
+                          >
+                            Применить как актуальную
+                          </button>
+                        )}
+                      </div>
                     </div>
 
-                    <ProcessesEditor
-                      editable={false}
-                      contentDoc={selectedVersion.descriptionDoc?.doc ?? null}
-                      changes={selectedVersion.diffData?.changes || []}
-                    />
+                    {compareMode && previousVersion ? (
+                      <div className="grid grid-cols-2 gap-4 mb-3">
+                        <div>
+                          <p className="text-xs font-medium text-gray-500 mb-1">Было (v.{previousVersion.version})</p>
+                          <div className="border border-gray-200 rounded p-2 min-h-[120px]">
+                            <ProcessesEditor
+                              editable={false}
+                              contentDoc={previousVersion.descriptionDoc?.doc ?? null}
+                              changes={[]}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-xs font-medium text-gray-500 mb-1">Стало (v.{selectedVersion.version})</p>
+                          <div className="border border-gray-200 rounded p-2 min-h-[120px]">
+                            <ProcessesEditor
+                              editable={false}
+                              contentDoc={selectedVersion.descriptionDoc?.doc ?? null}
+                              changes={selectedVersion.diffData?.changes || []}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
 
-                    {selectedVersion.diffData?.changes && selectedVersion.diffData.changes.length > 0 && (
-                      <div className="mt-3 border border-gray-200 rounded p-3">
+                    {!compareMode && selectedVersion.diffData?.changes && selectedVersion.diffData.changes.length > 0 ? (
+                      <div className="mb-3 border border-gray-200 rounded p-3">
                         <p className="text-sm font-medium text-gray-700 mb-2">Изменения в этой версии</p>
                         <div className="space-y-2">
                           {selectedVersion.diffData.changes.map((ch, idx) => (
@@ -1079,6 +1204,44 @@ export default function Processes() {
                           ))}
                         </div>
                       </div>
+                    ) : !compareMode ? (
+                      <p className="text-sm text-gray-500 mb-3">В этой версии изменений нет.</p>
+                    ) : null}
+
+                    {compareMode && previousVersion && selectedVersion.diffData?.changes && selectedVersion.diffData.changes.length > 0 ? (
+                      <div className="mt-2 mb-3 border border-gray-200 rounded p-3">
+                        <p className="text-sm font-medium text-gray-700 mb-2">Изменения в этой версии</p>
+                        <div className="space-y-2">
+                          {selectedVersion.diffData.changes.map((ch, idx) => (
+                            <div key={idx} className="text-xs border-l-2 border-gray-300 pl-2">
+                              {ch.changeType === 'modified' && ch.oldText && (
+                                <div>
+                                  <span className="text-red-600 font-medium">Удалено: </span>
+                                  <span className="text-gray-600 line-through">
+                                    {ch.oldText.length > 300 ? ch.oldText.slice(0, 300) + '...' : ch.oldText}
+                                  </span>
+                                </div>
+                              )}
+                              {ch.newText && (
+                                <div className={ch.oldText ? 'mt-1' : ''}>
+                                  <span className="text-green-600 font-medium">Добавлено: </span>
+                                  <span className="text-gray-800">
+                                    {ch.newText.length > 300 ? ch.newText.slice(0, 300) + '...' : ch.newText}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {!compareMode && (
+                      <ProcessesEditor
+                        editable={false}
+                        contentDoc={selectedVersion.descriptionDoc?.doc ?? null}
+                        changes={selectedVersion.diffData?.changes || []}
+                      />
                     )}
                   </div>
                 )}
@@ -1112,9 +1275,10 @@ export default function Processes() {
               <button
                 type="button"
                 onClick={openActivityHistory}
-                className="px-3 py-2 bg-accent text-white text-sm rounded hover:bg-accent-hover"
+                className="px-3 py-2 border border-gray-300 text-sm rounded hover:bg-gray-50"
+                title="Обновить список"
               >
-                Найти
+                Обновить
               </button>
               <button
                 type="button"

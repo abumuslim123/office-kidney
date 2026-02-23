@@ -181,6 +181,7 @@ export class UsersService {
       { slug: 'calls_api_key', name: 'API ключ Polza.ai' },
       { slug: 'processes_view', name: 'Процессы: просмотр' },
       { slug: 'processes_edit', name: 'Процессы: редактирование' },
+      { slug: 'processes_approve', name: 'Процессы: утверждение' },
     ]);
   }
 }
