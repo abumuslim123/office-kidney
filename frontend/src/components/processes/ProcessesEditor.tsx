@@ -18,6 +18,9 @@ import { TaggedDeleted, TaggedChanged, TaggedNew } from './TaggedMarks';
 
 export type { BlockChange };
 
+const ENABLE_HOVER_DIFF_TOOLTIP = false;
+const ENABLE_DIFF_BLOCK_HIGHLIGHT = false;
+
 function transformTaggedPastedHTML(html: string): string {
   if (!html || typeof html !== 'string') return html;
   return html
@@ -146,6 +149,7 @@ export default function ProcessesEditor({
 
   const handleMouseOver = useCallback(
     (e: React.MouseEvent) => {
+      if (!ENABLE_HOVER_DIFF_TOOLTIP) return;
       const target = e.target as HTMLElement;
       const block = target.closest('.process-changed-block');
       if (!block || !wrapperRef.current) {
@@ -194,7 +198,7 @@ export default function ProcessesEditor({
   return (
     <div
       ref={wrapperRef}
-      className="relative"
+      className={`relative${!ENABLE_DIFF_BLOCK_HIGHLIGHT ? ' process-editor-no-block-highlight' : ''}`}
       onMouseOver={handleMouseOver}
       onMouseOut={handleMouseOut}
       onDoubleClick={handleDoubleClick}
@@ -253,7 +257,7 @@ export default function ProcessesEditor({
         editor={editor}
         className={`process-editor border border-gray-300 rounded text-sm px-3 py-2 ${minHeightClassName}`}
       />
-      {tooltip.visible && (
+      {ENABLE_HOVER_DIFF_TOOLTIP && tooltip.visible && (
         <div
           className="process-change-tooltip absolute z-50 bg-gray-900 text-white text-xs rounded-md px-3 py-2 shadow-lg pointer-events-none"
           style={{

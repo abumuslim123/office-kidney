@@ -123,6 +123,7 @@ export default function Processes() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [acknowledging, setAcknowledging] = useState(false);
+  const [forceAcknowledging, setForceAcknowledging] = useState(false);
   const [creatingProcess, setCreatingProcess] = useState(false);
   const [deleteDepartmentModal, setDeleteDepartmentModal] = useState<{
     id: string;
@@ -589,6 +590,26 @@ export default function Processes() {
     }
   };
 
+  const forceAcknowledgeProcess = async () => {
+    if (!selectedProcess || !canForceApprove) return;
+    setForceAcknowledging(true);
+    try {
+      await api.post(`/processes/${selectedProcess.id}/force-acknowledge`);
+      await Promise.all([
+        loadProcess(selectedProcess.id),
+        loadDepartments(),
+        loadItems(selectedProcess.departmentId),
+      ]);
+    } catch (err: unknown) {
+      const msg = err && typeof err === 'object' && 'response' in err && typeof (err as { response?: { data?: { message?: unknown } } }).response?.data?.message === 'string'
+        ? (err as { response: { data: { message: string } } }).response.data.message
+        : 'Не удалось принудительно ознакомить';
+      setError(msg);
+    } finally {
+      setForceAcknowledging(false);
+    }
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -822,13 +843,41 @@ export default function Processes() {
               </div>
 
               {canEdit && !isIterationMode && (
-                <button
-                  type="button"
-                  onClick={startIteration}
-                  className="mb-3 px-3 py-2 border border-gray-300 text-sm rounded hover:bg-gray-50"
-                >
-                  Внести итерацию
-                </button>
+                <div className="mb-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={startIteration}
+                    className="px-3 py-2 border border-gray-300 text-sm rounded hover:bg-gray-50"
+                  >
+                    Внести итерацию
+                  </button>
+                  {versions.length >= 2 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowHistory(true);
+                        setCompareMode(true);
+                      }}
+                      className="px-3 py-2 border border-gray-300 text-sm rounded hover:bg-gray-50"
+                    >
+                      Сравнить с предыдущей версией
+                    </button>
+                  )}
+                  {canForceApprove &&
+                    selectedProcess?.acknowledgmentStats &&
+                    selectedProcess.acknowledgmentStats.total > 0 &&
+                    selectedProcess.acknowledgmentStats.acknowledged < selectedProcess.acknowledgmentStats.total && (
+                      <button
+                        type="button"
+                        onClick={forceAcknowledgeProcess}
+                        disabled={forceAcknowledging}
+                        className="px-3 py-2 border border-amber-400 text-amber-700 text-sm rounded hover:bg-amber-50 disabled:opacity-50"
+                        title="Отметить всех подписантов как ознакомившихся"
+                      >
+                        {forceAcknowledging ? 'Сохранение...' : 'Принудительно ознакомить'}
+                      </button>
+                    )}
+                </div>
               )}
               {canEdit && isIterationMode && (
                 <div className="mb-3 flex gap-2">

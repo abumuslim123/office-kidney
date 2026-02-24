@@ -183,6 +183,15 @@ export class ProcessesController {
     return this.processes.acknowledgeLatestVersion(processId, user);
   }
 
+  @Post(':id/force-acknowledge')
+  @Permissions('processes_edit')
+  forceAcknowledgeProcess(
+    @Param('id') processId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.processes.forceAcknowledgeProcess(processId, user);
+  }
+
   @Get(':id/activity')
   getProcessActivity(
     @Param('id') processId: string,

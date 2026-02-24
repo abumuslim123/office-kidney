@@ -88,6 +88,26 @@ body {
   background: #ea580c;
 }
 
+/* Отключение визуального выделения блока (обводка, фон) при ENABLE_DIFF_BLOCK_HIGHLIGHT = false */
+.process-editor-no-block-highlight .process-changed-block {
+  border-left: none;
+  padding-left: 0;
+  background: transparent;
+}
+.process-editor-no-block-highlight .process-changed-block:hover {
+  background: transparent;
+}
+.process-editor-no-block-highlight .process-changed-block[data-change-type="modified"] {
+  border-left: none;
+  background: transparent;
+}
+.process-editor-no-block-highlight .process-changed-block[data-change-type="modified"]:hover {
+  background: transparent;
+}
+.process-editor-no-block-highlight .process-changed-block::before {
+  display: none;
+}
+
 .process-editor .ProseMirror .tag-del {
   text-decoration: line-through;
   color: #dc2626;

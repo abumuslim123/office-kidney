@@ -500,6 +500,27 @@ export class ProcessesService {
     return this.findProcessById(process.id, currentUser);
   }
 
+  async forceAcknowledgeProcess(processId: string, currentUser: User) {
+    const process = await this.ensureProcess(processId);
+    await this.assertDepartmentAccessible(currentUser, process.departmentId);
+    if (!this.canForceApprove(currentUser)) {
+      throw new ForbiddenException(
+        'Принудительно ознакомить может только администратор или пользователь с правом «Процессы: утверждение»',
+      );
+    }
+    const latestVersion = await this.versionsRepo.findOne({
+      where: { processId: process.id },
+      order: { version: 'DESC' },
+      select: ['version'],
+    });
+    const latestVer = latestVersion?.version ?? 0;
+    const subscriberIds = await this.getUsersWithAccessToDepartment(process.departmentId);
+    for (const userId of subscriberIds) {
+      await this.upsertReadState(userId, process.id, latestVer);
+    }
+    return this.findProcessById(process.id, currentUser);
+  }
+
   async deleteProcess(id: string): Promise<void> {
     const process = await this.processesRepo.findOne({
       where: { id },
