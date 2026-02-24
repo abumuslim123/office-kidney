@@ -9,11 +9,15 @@ type NavItem = {
 
 const nav: NavItem[] = [
   { to: '/', label: 'Главная' },
-  { to: '/accounting', label: 'Учёт', permissions: ['accounting'] },
+  { to: '/calls', label: 'Звонки', permissions: ['calls'] },
+  { to: '/processes', label: 'Процессы', permissions: ['processes_view'] },
   { to: '/agents', label: 'Агенты', permissions: ['agents'] },
+  { to: '/bitrix24', label: 'Битрикс24', permissions: ['bitrix24'] },
   { to: '/services', label: 'Сервисы', permissions: ['services'] },
   { to: '/hr', label: 'HR', permissions: ['hr'] },
   { to: '/users', label: 'Пользователи', permissions: ['users'] },
+  { to: '/screens', label: 'Настройка экранов', permissions: ['screens'] },
+  { to: '/settings', label: 'Настройки', permissions: ['processes_edit'] },
 ];
 
 export default function Layout() {
@@ -57,7 +61,7 @@ export default function Layout() {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-600">
-            {user?.displayName || user?.email} <span className="text-gray-400">({user?.role})</span>
+            {user?.displayName || user?.login || user?.email} <span className="text-gray-400">({user?.role})</span>
           </span>
           <button
             type="button"

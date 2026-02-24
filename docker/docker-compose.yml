@@ -1,11 +1,17 @@
 version: '3.8'
 
+# Только для локальной разработки.
+# На продакшене всегда использовать:
+#   docker compose -f docker/docker-compose.prod.yml --env-file .env.production up -d
+# или: ./scripts/docker-compose-up.sh / ./scripts/rebuild.sh
+# Для локального запуска скопируйте .env.example в .env в корне репозитория.
+
 services:
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: ${DB_USERNAME:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_DATABASE:-kidney_office}
     ports:
       - "${DB_PORT:-5432}:5432"
@@ -27,11 +33,16 @@ services:
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USERNAME: ${DB_USERNAME:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD}
       DB_DATABASE: ${DB_DATABASE:-kidney_office}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       FRONTEND_URL: ${FRONTEND_URL:-https://kidney-office.srvu.ru}
+      API_BASE_URL: ${API_BASE_URL:-https://kidney-office.srvu.ru}
+      SCREENS_APK_PATH: apk/kidney-office-tv.apk
+    volumes:
+      - ../backend/apk:/app/apk:ro
+      - ../backend/uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy

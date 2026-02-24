@@ -20,9 +20,9 @@ export class AuthService {
     private config: ConfigService,
   ) {}
 
-  async validateUser(email: string, password: string): Promise<User | null> {
+  async validateUser(login: string, password: string): Promise<User | null> {
     const user = await this.userRepo.findOne({
-      where: { email: email.toLowerCase(), isActive: true },
+      where: { login, isActive: true },
       relations: ['role', 'permissions'],
     });
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) return null;
@@ -30,8 +30,8 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
-    const user = await this.validateUser(dto.email, dto.password);
-    if (!user) throw new UnauthorizedException('Invalid email or password');
+    const user = await this.validateUser(dto.login, dto.password);
+    if (!user) throw new UnauthorizedException('Invalid login or password');
     return this.issueTokens(user);
   }
 
@@ -53,7 +53,7 @@ export class AuthService {
   }
 
   private async issueTokens(user: User) {
-    const payload = { sub: user.id, email: user.email, role: user.role?.slug };
+    const payload = { sub: user.id, login: user.login, email: user.email ?? undefined, role: user.role?.slug };
     const accessSecret = this.config.get<string>('JWT_ACCESS_SECRET', 'access-secret-change-me');
     const refreshSecret = this.config.get<string>('JWT_REFRESH_SECRET', 'refresh-secret-change-me');
     const accessExpires = this.config.get<string>('JWT_ACCESS_EXPIRES', '15m');
@@ -85,7 +85,8 @@ export class AuthService {
       expiresIn: accessExpires,
       user: {
         id: user.id,
-        email: user.email,
+        login: user.login,
+        email: user.email ?? undefined,
         displayName: user.displayName,
         role: user.role?.slug,
         permissions: user.permissions?.map((p) => ({

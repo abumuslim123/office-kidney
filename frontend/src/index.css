@@ -5,3 +5,120 @@
 body {
   @apply bg-gray-50 text-gray-900 font-sans antialiased;
 }
+
+.process-editor .ProseMirror {
+  min-height: inherit;
+  outline: none;
+}
+
+.process-editor .ProseMirror ol {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+  margin: 0.25em 0;
+}
+
+.process-editor .ProseMirror ul {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+  margin: 0.25em 0;
+}
+
+.process-editor .ProseMirror li {
+  margin: 0.15em 0;
+}
+
+.process-editor .ProseMirror li ul,
+.process-editor .ProseMirror li ol {
+  margin-top: 0.15em;
+}
+
+.process-editor .ProseMirror h1,
+.process-editor .ProseMirror h2,
+.process-editor .ProseMirror h3,
+.process-editor .ProseMirror h4,
+.process-editor .ProseMirror h5,
+.process-editor .ProseMirror h6 {
+  margin: 0.5em 0 0.25em;
+  font-weight: 600;
+}
+
+.process-editor .ProseMirror p {
+  margin: 0 0 0.5em;
+}
+
+.process-editor .ProseMirror p:last-child {
+  margin-bottom: 0;
+}
+
+.process-changed-block {
+  border-left: 4px solid #16a34a;
+  padding-left: 10px;
+  position: relative;
+  transition: background-color 0.15s;
+  background-color: #f0fdf4;
+}
+
+.process-changed-block:hover {
+  background-color: #dcfce7;
+}
+
+/* added — зелёная граница, modified — оранжевая */
+.process-changed-block[data-change-type="modified"] {
+  border-left-color: #ea580c;
+  background-color: #fff7ed;
+}
+
+.process-changed-block[data-change-type="modified"]:hover {
+  background-color: #ffedd5;
+}
+
+.process-changed-block::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 6px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #16a34a;
+  opacity: 0.7;
+}
+
+.process-changed-block[data-change-type="modified"]::before {
+  background: #ea580c;
+}
+
+/* Отключение визуального выделения блока (обводка, фон) при ENABLE_DIFF_BLOCK_HIGHLIGHT = false */
+.process-editor-no-block-highlight .process-changed-block {
+  border-left: none;
+  padding-left: 0;
+  background: transparent;
+}
+.process-editor-no-block-highlight .process-changed-block:hover {
+  background: transparent;
+}
+.process-editor-no-block-highlight .process-changed-block[data-change-type="modified"] {
+  border-left: none;
+  background: transparent;
+}
+.process-editor-no-block-highlight .process-changed-block[data-change-type="modified"]:hover {
+  background: transparent;
+}
+.process-editor-no-block-highlight .process-changed-block::before {
+  display: none;
+}
+
+.process-editor .ProseMirror .tag-del {
+  text-decoration: line-through;
+  color: #dc2626;
+}
+
+.process-editor .ProseMirror .tag-change {
+  color: #d97706;
+  background-color: #fffbeb;
+}
+
+.process-editor .ProseMirror .tag-new {
+  color: #16a34a;
+  background-color: #f0fdf4;
+}

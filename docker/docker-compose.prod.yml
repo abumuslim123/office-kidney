@@ -39,6 +39,63 @@ services:
     # Не пробрасывать порт наружу в продакшне — доступ только из backend
     # ports: ["5432:5432"]
 
+  # Синхронизация пароля роли в существующем томе Postgres.
+  # Важно: работает без создания новой БД и без удаления тома.
+  # Требует, чтобы DB_USERNAME был суперпользователем (обычно postgres).
+  db_password_sync:
+    image: postgres:16-alpine
+    env_file:
+      - ../.env.production
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${DB_USERNAME}
+      PGPASSWORD: ${DB_PASSWORD}
+      PGDATABASE: ${DB_DATABASE}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - sh
+      - -euc
+      - |
+        echo "Syncing DB role password..."
+        if [ -z "$$DB_USERNAME" ] || [ -z "$$DB_PASSWORD" ] || [ -z "$$DB_DATABASE" ]; then
+          echo "ERROR: DB_USERNAME/DB_PASSWORD/DB_DATABASE must be set (check .env.production)" >&2
+          exit 1
+        fi
+        esc_pass="$$(printf "%s" "$$DB_PASSWORD" | sed "s/'/''/g")"
+        if [ -z "$$esc_pass" ]; then
+          echo "ERROR: Refusing to set empty password" >&2
+          exit 1
+        fi
+        psql -v ON_ERROR_STOP=1 \
+          -c "ALTER USER \"$$DB_USERNAME\" WITH PASSWORD '$$esc_pass';"
+        echo "DB role password synced."
+    restart: "no"
+
+  db_backup:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.db-backup
+    env_file:
+      - ../.env.production
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${DB_USERNAME}
+      PGPASSWORD: ${DB_PASSWORD}
+      PGDATABASE: ${DB_DATABASE}
+      DB_BACKUP_CRON: ${DB_BACKUP_CRON:-0 0 * * *}
+      DB_BACKUP_RETENTION_DAYS: ${DB_BACKUP_RETENTION_DAYS:-30}
+      DB_BACKUP_DIR: ${DB_BACKUP_DIR:-/backups}
+    volumes:
+      - ${DB_BACKUP_HOST_DIR:-../backups/postgres}:${DB_BACKUP_DIR:-/backups}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   backend:
     build:
       context: ..
@@ -50,15 +107,19 @@ services:
       PORT: 3000
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_USERNAME: ${DB_USERNAME}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_DATABASE: ${DB_DATABASE}
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
-      FRONTEND_URL: ${FRONTEND_URL}
     depends_on:
       postgres:
         condition: service_healthy
+      db_password_sync:
+        condition: service_completed_successfully
+    volumes:
+      - ../backend/apk:/app/apk:ro
+      - ../backend/uploads:/app/uploads
+    # Чтобы backend резолвил внутренний Bitrix (например bitrix*.kidney.srvu.ru), добавьте dns:
+    # с IP вашего DNS, обязательно оставив 127.0.0.11 (DNS Docker для имён postgres и т.д.):
+    # dns:
+    #   - 127.0.0.11
+    #   - 192.168.x.x
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:3000/api/health"]
       interval: 30s

@@ -28,3 +28,10 @@ npm-debug.log*
 # Misc
 *.tsbuildinfo
 coverage/
+
+# Built TV app APK (build via tv-app/Dockerfile.build)
+backend/apk/*.apk
+backend/apk/*.idsig
+
+# Gradle cache (tv-app)
+tv-app/.gradle/

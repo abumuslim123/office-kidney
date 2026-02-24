@@ -36,7 +36,15 @@ export class UsersService {
     return user;
   }
 
+  async findByLogin(login: string): Promise<User | null> {
+    return this.userRepo.findOne({
+      where: { login },
+      relations: ['role', 'permissions'],
+    });
+  }
+
   async findByEmail(email: string): Promise<User | null> {
+    if (!email?.trim()) return null;
     return this.userRepo.findOne({
       where: { email: email.toLowerCase() },
       relations: ['role', 'permissions'],
@@ -52,8 +60,12 @@ export class UsersService {
   }
 
   async create(dto: CreateUserDto): Promise<User> {
-    const existing = await this.findByEmail(dto.email);
-    if (existing) throw new ConflictException('User with this email already exists');
+    const existing = await this.findByLogin(dto.login);
+    if (existing) throw new ConflictException('User with this login already exists');
+    if (dto.email?.trim()) {
+      const byEmail = await this.findByEmail(dto.email);
+      if (byEmail) throw new ConflictException('User with this email already exists');
+    }
     const role = await this.roleRepo.findOne({ where: { id: dto.roleId } });
     if (!role) throw new NotFoundException('Role not found');
     const passwordHash = await bcrypt.hash(dto.password, 10);
@@ -64,7 +76,8 @@ export class UsersService {
     }
 
     const user = this.userRepo.create({
-      email: dto.email.toLowerCase(),
+      login: dto.login,
+      email: dto.email?.trim() ? dto.email.toLowerCase() : null,
       passwordHash,
       displayName: dto.displayName ?? '',
       roleId: dto.roleId,
@@ -76,10 +89,18 @@ export class UsersService {
 
   async update(id: string, dto: UpdateUserDto): Promise<User> {
     const user = await this.findOne(id);
-    if (dto.email && dto.email !== user.email) {
-      const existing = await this.findByEmail(dto.email);
-      if (existing) throw new ConflictException('User with this email already exists');
-      user.email = dto.email.toLowerCase();
+    if (dto.login !== undefined && dto.login !== user.login) {
+      const existing = await this.findByLogin(dto.login);
+      if (existing) throw new ConflictException('User with this login already exists');
+      user.login = dto.login;
+    }
+    if (dto.email !== undefined) {
+      const emailVal = dto.email?.trim() || null;
+      if (emailVal && emailVal !== user.email) {
+        const existing = await this.findByEmail(emailVal);
+        if (existing) throw new ConflictException('User with this email already exists');
+      }
+      user.email = emailVal ? emailVal.toLowerCase() : null;
     }
     if (dto.displayName !== undefined) user.displayName = dto.displayName;
     if (dto.isActive !== undefined) user.isActive = dto.isActive;
@@ -120,18 +141,20 @@ export class UsersService {
   }
 
   async seedAdminIfConfigured(): Promise<void> {
-    const email = process.env.SEED_ADMIN_EMAIL;
+    const login = process.env.SEED_ADMIN_LOGIN;
     const password = process.env.SEED_ADMIN_PASSWORD;
-    if (!email || !password) return;
+    if (!login || !password) return;
     const userCount = await this.userRepo.count();
     if (userCount > 0) return;
     const adminRole = await this.roleRepo.findOne({ where: { slug: 'admin' } });
     if (!adminRole) return;
     const allPermissions = await this.permissionRepo.find();
+    const email = process.env.SEED_ADMIN_EMAIL?.trim() || null;
     const passwordHash = await bcrypt.hash(password, 10);
     await this.userRepo.save(
       this.userRepo.create({
-        email: email.toLowerCase(),
+        login,
+        email: email ? email.toLowerCase() : null,
         passwordHash,
         displayName: 'Администратор',
         roleId: adminRole.id,
@@ -139,18 +162,26 @@ export class UsersService {
         permissions: allPermissions,
       }),
     );
-    console.log('Seed admin user created:', email);
+    console.log('Seed admin user created:', login);
   }
 
   async seedPermissionsIfEmpty(): Promise<void> {
     const count = await this.permissionRepo.count();
     if (count > 0) return;
     await this.permissionRepo.save([
-      { slug: 'accounting', name: 'Учёт' },
       { slug: 'agents', name: 'Агенты' },
       { slug: 'services', name: 'Сервисы' },
       { slug: 'hr', name: 'HR' },
       { slug: 'users', name: 'Пользователи' },
+      { slug: 'screens', name: 'Настройка экранов' },
+      { slug: 'bitrix24', name: 'Битрикс24' },
+      { slug: 'calls', name: 'Звонки' },
+      { slug: 'calls_manage_topics', name: 'Тематики звонков' },
+      { slug: 'calls_settings', name: 'Настройки звонков' },
+      { slug: 'calls_api_key', name: 'API ключ Polza.ai' },
+      { slug: 'processes_view', name: 'Процессы: просмотр' },
+      { slug: 'processes_edit', name: 'Процессы: редактирование' },
+      { slug: 'processes_approve', name: 'Процессы: утверждение' },
     ]);
   }
 }

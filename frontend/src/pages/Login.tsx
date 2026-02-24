@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Login() {
-  const [email, setEmail] = useState('');
+  const [loginValue, setLoginValue] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,7 +17,7 @@ export default function Login() {
     setError('');
     setLoading(true);
     try {
-      await login(email, password);
+      await login(loginValue, password);
       navigate(from, { replace: true });
     } catch (err: unknown) {
       setError(err && typeof err === 'object' && 'response' in err
@@ -43,16 +43,16 @@ export default function Login() {
           )}
           <div className="space-y-4">
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-                Email
+              <label htmlFor="login" className="block text-sm font-medium text-gray-700 mb-1">
+                Логин
               </label>
               <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="login"
+                type="text"
+                value={loginValue}
+                onChange={(e) => setLoginValue(e.target.value)}
                 required
-                autoComplete="email"
+                autoComplete="username"
                 className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
               />
             </div>

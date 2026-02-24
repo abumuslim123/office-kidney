@@ -79,17 +79,37 @@ SSL уже настроен через **Caddy** в `docker-compose.prod.yml`:
 
 После перезагрузки сервера контейнеры поднимутся автоматически. Логи: `journalctl -u kidney-office -f`. Остановка стека: `sudo systemctl stop kidney-office`.
 
+Проверка автозапуска после reboot:
+
+```bash
+sudo systemctl is-enabled kidney-office
+sudo systemctl status kidney-office
+docker ps
+```
+
 ### 5. Проверка после деплоя
 
 - Открыть `https://kidney-office.srvu.ru` — должна открыться страница входа.
 - `https://kidney-office.srvu.ru/api/health` — ответ `{"status":"ok","db":"up"}`.
 - Создать первого администратора (через API или переменные `SEED_ADMIN_EMAIL` и `SEED_ADMIN_PASSWORD` в `.env.production` при первом запуске).
+- Войти пользователем с правом `processes_view` и разрешить браузерные уведомления, чтобы автоматически создалась push-подписка.
+- Проверить, что backend подхватил push-конфигурацию: `docker exec docker-backend-1 sh -lc 'echo ${#VAPID_PUBLIC_KEY} ${#VAPID_PRIVATE_KEY} ${VAPID_SUBJECT}'`.
 
 ### 6. Обновление
 
+**Важно:** на продакшене не используйте `docker-compose.yml` (он только для локальной разработки). Пересборка и перезапуск — только через `docker-compose.prod.yml` и `.env.production`, иначе пароль БД и переменные окружения разойдутся.
+
+После обновления кода:
+
 ```bash
 git pull
-docker-compose -f docker/docker-compose.prod.yml --env-file .env.production up -d --build
+./scripts/rebuild.sh
+```
+
+Или явно:
+
+```bash
+docker compose -f docker/docker-compose.prod.yml --env-file .env.production up -d --build
 ```
 
 Миграции БД выполняются при каждом старте backend (только недостающие).
@@ -101,6 +121,24 @@ docker-compose -f docker/docker-compose.prod.yml logs -f
 docker-compose -f docker/docker-compose.prod.yml restart backend
 ```
 
+## Ежедневный backup PostgreSQL
+
+В production compose добавлен сервис `db_backup`, который выполняет `pg_dump` по cron и сохраняет архивы в папку `DB_BACKUP_HOST_DIR` на хосте (по умолчанию `../backups/postgres`).
+
+Быстрые проверки:
+
+```bash
+docker compose -f docker/docker-compose.prod.yml --env-file .env.production ps
+docker compose -f docker/docker-compose.prod.yml --env-file .env.production logs -f db_backup
+ls -la backups/postgres
+```
+
+Ручной запуск backup внутри контейнера:
+
+```bash
+docker compose -f docker/docker-compose.prod.yml --env-file .env.production exec db_backup /usr/local/bin/backup-db.sh
+```
+
 ## Переменные production
 
 | Переменная | Описание |
@@ -109,6 +147,11 @@ docker-compose -f docker/docker-compose.prod.yml restart backend
 | DB_USERNAME, DB_PASSWORD, DB_DATABASE | Подключение к PostgreSQL |
 | JWT_ACCESS_SECRET, JWT_REFRESH_SECRET | Секреты для JWT (обязательно сменить) |
 | FRONTEND_URL | Origin для CORS, обязательно HTTPS: `https://kidney-office.srvu.ru` |
+| VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT | Конфиг Web Push для уведомлений об итерациях |
+| DB_BACKUP_CRON | Cron-расписание backup (по умолчанию `0 0 * * *`) |
+| DB_BACKUP_RETENTION_DAYS | Срок хранения backup-файлов в днях (по умолчанию `30`) |
+| DB_BACKUP_DIR | Путь внутри контейнера backup (по умолчанию `/backups`) |
+| DB_BACKUP_HOST_DIR | Путь на хосте для хранения дампов (по умолчанию `../backups/postgres`) |
 | SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD | Опционально: первый админ при пустой БД |
 
 В production `NODE_ENV=production` задаётся в docker-compose; при этом отключены TypeORM `synchronize` и включены helmet, trust proxy и запуск миграций при старте.
