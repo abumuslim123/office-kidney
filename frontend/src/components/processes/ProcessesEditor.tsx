@@ -20,6 +20,8 @@ export type { BlockChange };
 
 const ENABLE_HOVER_DIFF_TOOLTIP = false;
 const ENABLE_DIFF_BLOCK_HIGHLIGHT = false;
+/** При true двойной клик по изменённому блоку открывает модалку с полным diff */
+const ENABLE_DOUBLE_CLICK_DIFF_MODAL = false;
 
 function transformTaggedPastedHTML(html: string): string {
   if (!html || typeof html !== 'string') return html;
@@ -181,6 +183,7 @@ export default function ProcessesEditor({
   );
 
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    if (!ENABLE_DOUBLE_CLICK_DIFF_MODAL) return;
     const target = e.target as HTMLElement;
     const block = target.closest('.process-changed-block');
     if (!block) return;
@@ -290,7 +293,7 @@ export default function ProcessesEditor({
           )}
         </div>
       )}
-      {diffModal.visible && (
+      {ENABLE_DOUBLE_CLICK_DIFF_MODAL && diffModal.visible && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50"
           onClick={() => setDiffModal((m) => ({ ...m, visible: false }))}

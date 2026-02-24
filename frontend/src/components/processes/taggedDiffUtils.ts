@@ -62,6 +62,30 @@ function getDocBlocks(doc: Record<string, unknown>): Record<string, unknown>[] {
   return content as Record<string, unknown>[];
 }
 
+/** Текст документа без фрагментов с маркой taggedDeleted (для отправки в AI). */
+export function getTextExcludingDeleted(
+  doc: Record<string, unknown> | null | undefined,
+): string {
+  if (!doc || typeof doc !== 'object') return '';
+  const blocks = getDocBlocks(doc);
+  const parts: string[] = [];
+  for (const block of blocks) {
+    const content = getBlockContent(block);
+    const blockParts: string[] = [];
+    for (const node of content) {
+      if (!node || typeof node !== 'object') continue;
+      const n = node as Record<string, unknown>;
+      const text = getNodeText(node);
+      if (!text) continue;
+      const marks = (n.marks as unknown[]) ?? [];
+      if (hasTaggedMark(marks, TAGGED_DEL)) continue;
+      blockParts.push(text);
+    }
+    parts.push(blockParts.join('').replace(/\s+/g, ' ').trim());
+  }
+  return parts.filter(Boolean).join('\n');
+}
+
 export function hasDocTaggedMarks(doc: Record<string, unknown> | null | undefined): boolean {
   if (!doc || typeof doc !== 'object') return false;
   const blocks = getDocBlocks(doc);

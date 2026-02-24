@@ -21,6 +21,7 @@ import Calls from './pages/Calls';
 import CallTopics from './pages/CallTopics';
 import CallsSettings from './pages/CallsSettings';
 import Processes from './pages/Processes';
+import Settings from './pages/Settings';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -63,6 +64,7 @@ function App() {
         <Route path="services" element={<ProtectedRoute permissions={['services']}><Services /></ProtectedRoute>} />
         <Route path="calls" element={<ProtectedRoute permissions={['calls']}><Calls /></ProtectedRoute>} />
         <Route path="processes" element={<ProtectedRoute permissions={['processes_view']}><Processes /></ProtectedRoute>} />
+        <Route path="settings" element={<ProtectedRoute permissions={['processes_edit']}><Settings /></ProtectedRoute>} />
         <Route path="calls/topics" element={<ProtectedRoute permissions={['calls_manage_topics']}><CallTopics /></ProtectedRoute>} />
         <Route path="calls/settings" element={<ProtectedRoute permissions={['calls_settings']}><CallsSettings /></ProtectedRoute>} />
         <Route path="hr" element={<ProtectedRoute permissions={['hr']}><HR /></ProtectedRoute>} />

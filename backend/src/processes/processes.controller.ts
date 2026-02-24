@@ -31,6 +31,7 @@ import { SetDepartmentUsersDto } from './dto/set-department-users.dto';
 import { UpdateProcessDepartmentDto } from './dto/update-process-department.dto';
 import { UpdateProcessDto } from './dto/update-process.dto';
 import { UpdateVersionCorrectionsDto } from './dto/update-version-corrections.dto';
+import { SuggestChecklistsDto } from './dto/suggest-checklists.dto';
 import { ProcessesService } from './processes.service';
 
 @Controller('processes')
@@ -134,6 +135,20 @@ export class ProcessesController {
     return this.processes.createProcess(dto, user);
   }
 
+  @Get('settings')
+  @Permissions('processes_edit')
+  getPolzaSettings() {
+    return this.processes.getPolzaSettings();
+  }
+
+  @Put('settings')
+  @Permissions('processes_edit')
+  updatePolzaSettings(
+    @Body() body: { apiKey?: string; baseUrl?: string; model?: string },
+  ) {
+    return this.processes.updatePolzaSettings(body);
+  }
+
   @Get(':id')
   getProcess(@Param('id') id: string, @CurrentUser() user: User) {
     return this.processes.findProcessById(id, user);
@@ -156,6 +171,16 @@ export class ProcessesController {
     @CurrentUser() user: User,
   ) {
     return this.processes.createVersion(processId, dto, user);
+  }
+
+  @Post(':id/suggest-checklists')
+  @Permissions('processes_edit')
+  suggestChecklists(
+    @Param('id') processId: string,
+    @Body() dto: SuggestChecklistsDto,
+    @CurrentUser() user: User,
+  ) {
+    return this.processes.suggestChecklists(processId, dto.text, user);
   }
 
   @Post(':id/approve')

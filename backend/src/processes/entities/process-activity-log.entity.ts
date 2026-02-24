@@ -13,7 +13,8 @@ import { Process } from './process.entity';
 export type ProcessActivityActionType =
   | 'view_process'
   | 'view_version'
-  | 'acknowledge_latest';
+  | 'acknowledge_latest'
+  | 'checklist_approved';
 
 @Entity('process_activity_log')
 export class ProcessActivityLog {

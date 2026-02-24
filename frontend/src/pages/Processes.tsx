@@ -3,7 +3,11 @@ import { useLocation } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import ProcessesEditor, { BlockChange } from '../components/processes/ProcessesEditor';
-import { hasDocTaggedMarks, buildDiffFromTaggedDoc } from '../components/processes/taggedDiffUtils';
+import {
+  hasDocTaggedMarks,
+  buildDiffFromTaggedDoc,
+  getTextExcludingDeleted,
+} from '../components/processes/taggedDiffUtils';
 
 type ProcessDepartmentNode = {
   id: string;
@@ -27,6 +31,10 @@ type ProcessVersion = {
   descriptionDoc: { doc?: Record<string, unknown>; text?: string };
   diffData: { changes: BlockChange[] } | null;
   changedAt: string;
+  changedBy?: { id: string; displayName?: string; login?: string } | null;
+  checklist?: {
+    items: Array<{ title: string; assignee?: string; completed?: boolean }>;
+  } | null;
 };
 
 type ProcessDetails = {
@@ -39,14 +47,14 @@ type ProcessDetails = {
   currentDescriptionDoc: { doc?: Record<string, unknown>; text?: string };
   department?: { id: string; name: string; parentId: string | null };
   latestVersion: ProcessVersion | null;
-  acknowledgmentStats?: { total: number; acknowledged: number };
+  acknowledgmentStats?: { total: number; acknowledged: number; notAcknowledgedUserNames?: string[] };
 };
 
 type ProcessActivityItem = {
   id: string;
   processId: string;
   versionId: string | null;
-  actionType: 'view_process' | 'view_version' | 'acknowledge_latest';
+  actionType: 'view_process' | 'view_version' | 'acknowledge_latest' | 'checklist_approved';
   createdAt: string;
   meta: Record<string, unknown> | null;
   user: {
@@ -78,6 +86,10 @@ function getActivityActionText(item: ProcessActivityItem): string {
   if (item.actionType === 'view_version') {
     const version = item.version?.version;
     return version ? `Просмотрел итерацию #${version}` : 'Просмотрел итерацию';
+  }
+  if (item.actionType === 'checklist_approved') {
+    const n = item.meta && typeof item.meta.itemsCount === 'number' ? item.meta.itemsCount : null;
+    return n != null ? `Утвердил чек-лист (${n} ${n === 1 ? 'пункт' : n < 5 ? 'пункта' : 'пунктов'})` : 'Утвердил чек-лист';
   }
   const version = item.version?.version;
   return version
@@ -142,6 +154,12 @@ export default function Processes() {
   const [titleInputWidth, setTitleInputWidth] = useState(192); // 12rem default
   const titleMeasureRef = useRef<HTMLSpanElement>(null);
   const lastActivitySearchRef = useRef<string | undefined>(undefined);
+  const [showChecklistBlock, setShowChecklistBlock] = useState(false);
+  const [checklistDocDraft, setChecklistDocDraft] = useState<Record<string, unknown> | null>(null);
+  const [checklistLoading, setChecklistLoading] = useState(false);
+  const [checklistError, setChecklistError] = useState('');
+  const [checklistSaving, setChecklistSaving] = useState(false);
+  const [ackTooltipVisible, setAckTooltipVisible] = useState(false);
 
   const selectedVersion = versions.find((v) => v.id === selectedVersionId) ?? null;
   const selectedVersionIndex = selectedVersionId ? versions.findIndex((v) => v.id === selectedVersionId) : -1;
@@ -610,6 +628,141 @@ export default function Processes() {
     }
   };
 
+  function itemsToChecklistText(items: { title: string; assignee?: string }[]): string {
+    return items
+      .map((i) => (i.assignee?.trim() ? `${i.title.trim()} (${i.assignee.trim()})` : i.title.trim()))
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  function parseChecklistText(text: string): { title: string; assignee?: string }[] {
+    return text
+      .split(/\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const m = line.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
+        if (m) return { title: m[1].trim(), assignee: m[2].trim() || undefined };
+        return { title: line, assignee: undefined };
+      });
+  }
+
+  function textToChecklistDoc(text: string): Record<string, unknown> {
+    const lines = text.split(/\n/);
+    const content = lines.map((line) => ({
+      type: 'paragraph',
+      content: line ? [{ type: 'text', text: line }] : [],
+    }));
+    return { type: 'doc', content: content.length ? content : [{ type: 'paragraph', content: [] }] };
+  }
+
+  function getChecklistTextFromDoc(doc: Record<string, unknown> | null): string {
+    if (!doc || !doc.content || !Array.isArray(doc.content)) return '';
+    return (doc.content as Record<string, unknown>[])
+      .map((node) => {
+        if (node.type !== 'paragraph' || !Array.isArray(node.content)) return '';
+        return (node.content as Array<{ text?: string }>).map((n) => n.text || '').join('');
+      })
+      .join('\n');
+  }
+
+  const emptyChecklistDoc = useMemo(() => textToChecklistDoc(''), []);
+
+  const openChecklistBlock = async () => {
+    if (!selectedProcess || !canEdit) return;
+    setShowChecklistBlock(true);
+    setChecklistError('');
+    setChecklistDocDraft(emptyChecklistDoc);
+    const doc =
+      isIterationMode ? iterationDocDraft : (editDocDraft ?? selectedProcess.currentDescriptionDoc ?? null);
+    const text = getTextExcludingDeleted(doc);
+    if (!text.trim()) {
+      setChecklistError('Нет текста для анализа. Добавьте описание процесса или итерацию.');
+      return;
+    }
+    setChecklistLoading(true);
+    try {
+      const res = await api.post<{ items: { title: string; assignee?: string }[] }>(
+        `/processes/${selectedProcess.id}/suggest-checklists`,
+        { text },
+      );
+      const items = Array.isArray(res.data?.items) ? res.data.items : [];
+      setChecklistDocDraft(textToChecklistDoc(itemsToChecklistText(items)));
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'response' in err &&
+        typeof (err as { response?: { data?: { message?: unknown } } }).response?.data?.message === 'string'
+          ? (err as { response: { data: { message: string } } }).response.data.message
+          : 'Не удалось получить предложения';
+      setChecklistError(msg);
+    } finally {
+      setChecklistLoading(false);
+    }
+  };
+
+  const fetchChecklistSuggestions = async () => {
+    if (!selectedProcess || !canEdit) return;
+    setChecklistError('');
+    const doc =
+      isIterationMode ? iterationDocDraft : (editDocDraft ?? selectedProcess.currentDescriptionDoc ?? null);
+    const text = getTextExcludingDeleted(doc);
+    if (!text.trim()) {
+      setChecklistError('Нет текста для анализа.');
+      return;
+    }
+    setChecklistLoading(true);
+    try {
+      const res = await api.post<{ items: { title: string; assignee?: string }[] }>(
+        `/processes/${selectedProcess.id}/suggest-checklists`,
+        { text },
+      );
+      const items = Array.isArray(res.data?.items) ? res.data.items : [];
+      setChecklistDocDraft(textToChecklistDoc(itemsToChecklistText(items)));
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'response' in err &&
+        typeof (err as { response?: { data?: { message?: unknown } } }).response?.data?.message === 'string'
+          ? (err as { response: { data: { message: string } } }).response.data.message
+          : 'Не удалось получить предложения';
+      setChecklistError(msg);
+    } finally {
+      setChecklistLoading(false);
+    }
+  };
+
+  const approveChecklist = async () => {
+    const text = getChecklistTextFromDoc(checklistDocDraft);
+    const items = parseChecklistText(text);
+    if (!selectedProcess || !canEdit || !items.length) return;
+    const doc =
+      isIterationMode ? iterationDocDraft : (editDocDraft ?? selectedProcess.currentDescriptionDoc ?? null);
+    const descriptionDoc = doc && typeof doc === 'object' ? (doc.doc != null ? { doc: doc.doc } : { doc: doc }) : { doc: selectedProcess.currentDescriptionDoc?.doc ?? {} };
+    setChecklistSaving(true);
+    setChecklistError('');
+    try {
+      await api.post(`/processes/${selectedProcess.id}/versions`, {
+        descriptionDoc,
+        checklist: { items },
+      });
+      await Promise.all([
+        loadProcess(selectedProcess.id),
+        loadDepartments(),
+        loadItems(selectedProcess.departmentId),
+      ]);
+      setShowChecklistBlock(false);
+      setChecklistDocDraft(null);
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'response' in err &&
+        typeof (err as { response?: { data?: { message?: unknown } } }).response?.data?.message === 'string'
+          ? (err as { response: { data: { message: string } } }).response.data.message
+          : 'Не удалось сохранить чек-лист';
+      setChecklistError(msg);
+    } finally {
+      setChecklistSaving(false);
+    }
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -751,7 +904,11 @@ export default function Processes() {
                   )}
                   {selectedProcess.acknowledgmentStats &&
                     selectedProcess.acknowledgmentStats.total > 0 && (
-                      <div className="mt-2">
+                      <div
+                        className="mt-2 relative"
+                        onMouseEnter={() => setAckTooltipVisible(true)}
+                        onMouseLeave={() => setAckTooltipVisible(false)}
+                      >
                         <div className="text-xs text-gray-600">
                           Ознакомились: {selectedProcess.acknowledgmentStats.acknowledged} из{' '}
                           {selectedProcess.acknowledgmentStats.total}
@@ -768,6 +925,12 @@ export default function Processes() {
                             }}
                           />
                         </div>
+                        {ackTooltipVisible &&
+                          (selectedProcess.acknowledgmentStats.notAcknowledgedUserNames?.length ?? 0) > 0 && (
+                            <div className="absolute z-10 left-0 top-full mt-1 bg-gray-800 text-white text-xs rounded px-2 py-1.5 shadow-lg whitespace-nowrap">
+                              Не ознакомились: {(selectedProcess.acknowledgmentStats.notAcknowledgedUserNames ?? []).join(', ')}
+                            </div>
+                          )}
                       </div>
                     )}
                 </div>
@@ -808,12 +971,9 @@ export default function Processes() {
                   </button>
                   {canEdit &&
                     hasChanges &&
+                    canForceApprove &&
                     (() => {
-                      const stats = selectedProcess.acknowledgmentStats;
-                      const allAcknowledged =
-                        !stats || stats.total === 0 || stats.acknowledged >= stats.total;
-                      const showApprove = allAcknowledged || canForceApprove;
-                      return showApprove ? (
+                      return (
                         <button
                           type="button"
                           disabled={saving}
@@ -825,7 +985,7 @@ export default function Processes() {
                         <path fillRule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clipRule="evenodd" />
                       </svg>
                         </button>
-                      ) : null;
+                      );
                     })()}
                   {canEdit && (
                     <button
@@ -847,7 +1007,7 @@ export default function Processes() {
                   <button
                     type="button"
                     onClick={startIteration}
-                    className="px-3 py-2 border border-gray-300 text-sm rounded hover:bg-gray-50"
+                    className="px-2 py-1.5 border border-gray-300 text-xs rounded hover:bg-gray-50"
                   >
                     Внести итерацию
                   </button>
@@ -858,11 +1018,19 @@ export default function Processes() {
                         setShowHistory(true);
                         setCompareMode(true);
                       }}
-                      className="px-3 py-2 border border-gray-300 text-sm rounded hover:bg-gray-50"
+                      className="px-2 py-1.5 border border-gray-300 text-xs rounded hover:bg-gray-50"
                     >
                       Сравнить с предыдущей версией
                     </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={openChecklistBlock}
+                    className="px-2 py-1.5 border border-gray-300 text-xs rounded hover:bg-gray-50"
+                    title="Сгенерировать чек-листы по тексту процесса"
+                  >
+                    Сгенерировать чек листы
+                  </button>
                   {canForceApprove &&
                     selectedProcess?.acknowledgmentStats &&
                     selectedProcess.acknowledgmentStats.total > 0 &&
@@ -871,7 +1039,7 @@ export default function Processes() {
                         type="button"
                         onClick={forceAcknowledgeProcess}
                         disabled={forceAcknowledging}
-                        className="px-3 py-2 border border-amber-400 text-amber-700 text-sm rounded hover:bg-amber-50 disabled:opacity-50"
+                        className="px-2 py-1.5 border border-amber-400 text-amber-700 text-xs rounded hover:bg-amber-50 disabled:opacity-50"
                         title="Отметить всех подписантов как ознакомившихся"
                       >
                         {forceAcknowledging ? 'Сохранение...' : 'Принудительно ознакомить'}
@@ -907,6 +1075,77 @@ export default function Processes() {
                   if (isIterationMode) setIterationDocDraft(doc);
                 }}
               />
+
+              {selectedProcess?.latestVersion?.checklist?.items?.length ? (
+                <div className="mt-4 border border-gray-200 rounded-lg p-3">
+                  <h4 className="text-sm font-medium text-gray-700 mb-2">Текущий чек-лист</h4>
+                  <ul className="space-y-1.5">
+                    {selectedProcess.latestVersion.checklist.items.map((it, idx) => (
+                      <li key={idx} className="flex items-center gap-2 text-sm">
+                        <span className="flex-shrink-0 text-gray-500">
+                          {it.completed === true ? '✓' : '○'}
+                        </span>
+                        <span className={it.completed === true ? 'text-gray-500 line-through' : ''}>
+                          {it.title}
+                        </span>
+                        {it.assignee && (
+                          <span className="text-gray-500 text-xs">({it.assignee})</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {showChecklistBlock && selectedProcess && canEdit && (
+                <div className="mt-4 border border-gray-200 rounded-lg p-4 bg-gray-50/50">
+                  <h4 className="text-sm font-medium text-gray-700 mb-2">Чек-лист</h4>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Один пункт на строку. Ответственного можно указать в скобках: Пункт (Имя). Поле редактируется так же, как описание процесса.
+                  </p>
+                  {checklistError && (
+                    <p className="text-sm text-red-600 mb-2">{checklistError}</p>
+                  )}
+                  {checklistLoading ? (
+                    <p className="text-sm text-gray-500 mb-2">Загрузка предложений...</p>
+                  ) : null}
+                  <ProcessesEditor
+                    editable={true}
+                    contentDoc={checklistDocDraft ?? emptyChecklistDoc}
+                    onChange={({ doc }) => setChecklistDocDraft(doc)}
+                    minHeightClassName="min-h-[120px]"
+                  />
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={fetchChecklistSuggestions}
+                      disabled={checklistLoading}
+                      className="px-3 py-2 border border-gray-300 text-sm rounded hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      {checklistLoading ? 'Загрузка...' : 'Сгенерировать'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={approveChecklist}
+                      disabled={checklistSaving || !parseChecklistText(getChecklistTextFromDoc(checklistDocDraft)).length}
+                      className="px-3 py-2 bg-accent text-white text-sm rounded hover:bg-accent-hover disabled:opacity-50"
+                    >
+                      {checklistSaving ? 'Сохранение...' : 'Утвердить'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowChecklistBlock(false);
+                        setChecklistDocDraft(null);
+                        setChecklistError('');
+                      }}
+                      className="px-3 py-2 border border-gray-300 text-sm rounded hover:bg-gray-50"
+                    >
+                      Закрыть
+                    </button>
+                  </div>
+                </div>
+              )}
 
             </div>
           )}
@@ -1166,6 +1405,11 @@ export default function Processes() {
                   >
                     <div className="text-sm font-medium">Версия #{v.version}</div>
                     <div className="text-xs text-gray-500">{formatDate(v.changedAt)}</div>
+                    {v.changedBy && (
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        {v.changedBy.displayName || v.changedBy.login || '—'}
+                      </div>
+                    )}
                   </button>
                 ))}
               </div>
@@ -1177,6 +1421,11 @@ export default function Processes() {
                     <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                       <div className="text-sm text-gray-600">
                         Версия #{selectedVersion.version} от {formatDate(selectedVersion.changedAt)}
+                        {selectedVersion.changedBy && (
+                          <span className="text-gray-500 ml-1">
+                            · {selectedVersion.changedBy.displayName || selectedVersion.changedBy.login || '—'}
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-2">
                         {previousVersion && (
@@ -1282,6 +1531,25 @@ export default function Processes() {
                             </div>
                           ))}
                         </div>
+                      </div>
+                    ) : null}
+
+                    {selectedVersion.checklist?.items?.length ? (
+                      <div className="mb-3 border border-gray-200 rounded p-3">
+                        <p className="text-sm font-medium text-gray-700 mb-2">Чек-лист</p>
+                        <ul className="space-y-1">
+                          {selectedVersion.checklist.items.map((it, idx) => (
+                            <li key={idx} className="text-sm flex items-center gap-2">
+                              {it.completed === true ? (
+                                <span className="text-emerald-600" title="Выполнено">✓</span>
+                              ) : (
+                                <span className="text-gray-400">○</span>
+                              )}{' '}
+                              {it.title}
+                              {it.assignee && <span className="text-gray-500">— {it.assignee}</span>}
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                     ) : null}
 

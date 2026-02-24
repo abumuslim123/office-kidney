@@ -30,7 +30,12 @@ export default function Users() {
   const [passwordUser, setPasswordUser] = useState<UserRow | null>(null);
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '' });
   const [passwordError, setPasswordError] = useState('');
-  const processPerms = permissions.filter((p) => p.slug === 'processes_view' || p.slug === 'processes_edit');
+  const processPerms = permissions.filter(
+    (p) =>
+      p.slug === 'processes_view' ||
+      p.slug === 'processes_edit' ||
+      p.slug === 'processes_approve',
+  );
   const hrPerms = permissions.filter((p) => p.slug === 'hr' || p.slug.startsWith('hr_'));
   const otherPerms = permissions.filter(
     (p) =>
@@ -292,7 +297,7 @@ export default function Users() {
       )}
 
       {editingUser && (
-        <form onSubmit={handleSaveEdit} className="mb-6 p-4 bg-white border border-gray-200 rounded-lg max-w-md">
+        <form onSubmit={handleSaveEdit} className="mb-6 p-4 bg-white border border-gray-200 rounded-lg w-full max-w-4xl">
           <h3 className="text-lg font-medium text-gray-900 mb-3">Редактировать пользователя</h3>
           {editError && <p className="text-red-600 text-sm mb-2">{editError}</p>}
           <div className="grid gap-3">
@@ -337,11 +342,11 @@ export default function Users() {
             </label>
             <div className="pt-2">
               <p className="text-sm font-medium text-gray-700 mb-2">Права доступа:</p>
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap gap-8">
                 {processPerms.length > 0 && (
                   <div>
-                    <p className="text-xs text-gray-500 mb-1.5">Процессы</p>
-                    <div className="flex flex-wrap gap-3">
+                    <p className="text-sm font-medium text-gray-700 mb-2">Процессы</p>
+                    <div className="flex flex-col gap-2">
                       {processPerms.map((p) => (
                         <label key={p.id} className="flex items-center gap-1.5 text-sm">
                           <input
@@ -357,8 +362,8 @@ export default function Users() {
                 )}
                 {hrPerms.length > 0 && (
                   <div>
-                    <p className="text-xs text-gray-500 mb-1.5">HR</p>
-                    <div className="flex flex-wrap gap-3">
+                    <p className="text-sm font-medium text-gray-700 mb-2">HR</p>
+                    <div className="flex flex-col gap-2">
                       {hrPerms.map((p) => (
                         <label key={p.id} className="flex items-center gap-1.5 text-sm">
                           <input
@@ -373,17 +378,20 @@ export default function Users() {
                   </div>
                 )}
                 {otherPerms.length > 0 && (
-                  <div className="flex flex-wrap gap-3">
-                    {otherPerms.map((p) => (
-                      <label key={p.id} className="flex items-center gap-1.5 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={editForm.permissionIds.includes(p.id)}
-                          onChange={() => toggleEditPermission(p.id)}
-                        />
-                        {p.name}
-                      </label>
-                    ))}
+                  <div>
+                    <p className="text-sm font-medium text-gray-700 mb-2">Другое</p>
+                    <div className="flex flex-col gap-2">
+                      {otherPerms.map((p) => (
+                        <label key={p.id} className="flex items-center gap-1.5 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={editForm.permissionIds.includes(p.id)}
+                            onChange={() => toggleEditPermission(p.id)}
+                          />
+                          {p.name}
+                        </label>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -485,28 +493,46 @@ export default function Users() {
                     </div>
                   </td>
                   <td className="px-4 py-3">{u.isActive ? 'Активен' : 'Отключён'}</td>
-                  <td className="px-4 py-3 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => openEdit(u)}
-                      className="text-accent hover:underline"
-                    >
-                      Редактировать
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openPassword(u)}
-                      className="text-accent hover:underline"
-                    >
-                      Сменить пароль
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => toggleActive(u.id, !u.isActive)}
-                      className="text-accent hover:underline"
-                    >
-                      {u.isActive ? 'Отключить' : 'Включить'}
-                    </button>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openEdit(u)}
+                        title="Редактировать"
+                        className="p-2 rounded text-blue-600 hover:bg-blue-50"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                          <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.795L2 15.174V18h2.826l9.38-9.379-2.83-2.828z" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openPassword(u)}
+                        title="Сменить пароль"
+                        className="p-2 rounded text-gray-600 hover:bg-gray-100"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                          <path fillRule="evenodd" d="M8 10a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5A.75.75 0 0 1 8 10Z" clipRule="evenodd" />
+                          <path fillRule="evenodd" d="M3.75 6A2.75 2.75 0 0 1 6.5 3.25h7A2.75 2.75 0 0 1 16.25 6v8A2.75 2.75 0 0 1 13.5 16.75h-7A2.75 2.75 0 0 1 3.75 14V6Zm2.75-1.25a1.25 1.25 0 0 0-1.25 1.25v8a1.25 1.25 0 0 0 1.25 1.25h7a1.25 1.25 0 0 0 1.25-1.25V6a1.25 1.25 0 0 0-1.25-1.25h-7Z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleActive(u.id, !u.isActive)}
+                        title={u.isActive ? 'Отключить' : 'Включить'}
+                        className={`p-2 rounded ${u.isActive ? 'text-red-600 hover:bg-red-50' : 'text-emerald-600 hover:bg-emerald-50'}`}
+                      >
+                        {u.isActive ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                            <path d="M10 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.465 14.493a1.23 1.23 0 0 0 .41 1.412A9.957 9.957 0 0 0 10 18c2.31 0 4.438-.784 6.131-2.1.43-.333.604-.903.408-1.41a7.002 7.002 0 0 0-13.074.003Z" />
+                          </svg>
+                        ) : (
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clipRule="evenodd" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

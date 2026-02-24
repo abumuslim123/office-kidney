@@ -34,6 +34,7 @@ import { AddProcessesModule1739300000000 } from './migrations/1739300000000-AddP
 import { AddProcessesAccessAndPush1739500000000 } from './migrations/1739500000000-AddProcessesAccessAndPush';
 import { AddProcessActivityLog1739600000000 } from './migrations/1739600000000-AddProcessActivityLog';
 import { AddProcessesApprovePermission1739700000000 } from './migrations/1739700000000-AddProcessesApprovePermission';
+import { AddProcessVersionChecklist1739800000000 } from './migrations/1739800000000-AddProcessVersionChecklist';
 import { ProcessesModule } from './processes/processes.module';
 
 @Module({
@@ -48,7 +49,7 @@ import { ProcessesModule } from './processes/processes.module';
       database: process.env.DB_DATABASE || 'kidney_office',
       autoLoadEntities: true,
       synchronize: process.env.NODE_ENV !== 'production',
-      migrations: [InitialSchema1738166400000, AddPermissions1738252800000, AddHrTables1738339200000, AddHrFolders1738425600000, AddHrDetailPermissions1738512000000, AddHrDeleteAllAndManageFields1738598400000, AddHrEvents1738684800000, AddHrEventsEndDate1738771200000, AddHrEventsShare1738771300000, AddHrEventsColor1738771400000, AddHrListsShare1738771500000, ListSharePerList1738771600000, AddScreensModule1738771800000, AddUserLogin1738950000000, AddAppSettings1738953600000, RemoveAccountingPermission1738953700000, AddBitrix24Permission1738953800000, AddCallsModule1739210000000, AddCallsSettingsPermissions1739211000000, AddProcessesModule1739300000000, AddProcessesAccessAndPush1739500000000, AddProcessActivityLog1739600000000, AddProcessesApprovePermission1739700000000],
+      migrations: [InitialSchema1738166400000, AddPermissions1738252800000, AddHrTables1738339200000, AddHrFolders1738425600000, AddHrDetailPermissions1738512000000, AddHrDeleteAllAndManageFields1738598400000, AddHrEvents1738684800000, AddHrEventsEndDate1738771200000, AddHrEventsShare1738771300000, AddHrEventsColor1738771400000, AddHrListsShare1738771500000, ListSharePerList1738771600000, AddScreensModule1738771800000, AddUserLogin1738950000000, AddAppSettings1738953600000, RemoveAccountingPermission1738953700000, AddBitrix24Permission1738953800000, AddCallsModule1739210000000, AddCallsSettingsPermissions1739211000000, AddProcessesModule1739300000000, AddProcessesAccessAndPush1739500000000, AddProcessActivityLog1739600000000, AddProcessesApprovePermission1739700000000, AddProcessVersionChecklist1739800000000],
       migrationsRun: false,
     }),
     HealthModule,

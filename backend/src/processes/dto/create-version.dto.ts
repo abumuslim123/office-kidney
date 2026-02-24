@@ -16,4 +16,10 @@ export class CreateVersionDto {
       changedAt?: string;
     }>;
   };
+
+  @IsOptional()
+  @IsObject()
+  checklist?: {
+    items: Array<{ title: string; assignee?: string }>;
+  };
 }

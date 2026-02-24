@@ -27,6 +27,13 @@ import { Process } from './entities/process.entity';
 import { ProcessReadState } from './entities/process-read-state.entity';
 import { ProcessVersion } from './entities/process-version.entity';
 import { PushNotificationsService } from './push-notifications.service';
+import { ChecklistAiService, ChecklistSuggestedItem } from './checklist-ai.service';
+import { AppSetting } from '../settings/entities/app-setting.entity';
+import {
+  PROCESS_POLZA_API_KEY,
+  PROCESS_POLZA_BASE_URL,
+  PROCESS_POLZA_MODEL,
+} from './process-polza-settings.constants';
 
 type DiffChange = {
   blockIndex: number;
@@ -60,7 +67,10 @@ export class ProcessesService {
     private readStateRepo: Repository<ProcessReadState>,
     @InjectRepository(User)
     private usersRepo: Repository<User>,
+    @InjectRepository(AppSetting)
+    private settingsRepo: Repository<AppSetting>,
     private pushNotifications: PushNotificationsService,
+    private checklistAi: ChecklistAiService,
   ) {}
 
   async getDepartmentTree(currentUser: User) {
@@ -382,7 +392,7 @@ export class ProcessesService {
     }
     const acknowledgmentStats = currentUser
       ? await this.getAcknowledgmentStats(id)
-      : { total: 0, acknowledged: 0 };
+      : { total: 0, acknowledged: 0, notAcknowledgedUserNames: [] };
     return { ...process, latestVersion, hasUnread, acknowledgmentStats };
   }
 
@@ -408,6 +418,7 @@ export class ProcessesService {
     currentUser: User,
   ) {
     const process = await this.ensureProcess(processId);
+    await this.assertDepartmentAccessible(currentUser, process.departmentId);
     const nextDoc = this.normalizeDoc(dto.descriptionDoc);
     const lastVersion = await this.versionsRepo.findOne({
       where: { processId: process.id },
@@ -417,8 +428,9 @@ export class ProcessesService {
     const prevDoc = lastVersion?.descriptionDoc ?? process.currentDescriptionDoc;
     const prevText = this.extractText(prevDoc);
     const nextText = this.extractText(nextDoc);
-    if (prevText === nextText) {
-      return this.findProcessById(process.id);
+    const hasChecklist = Array.isArray(dto.checklist?.items) && dto.checklist.items.length > 0;
+    if (prevText === nextText && !hasChecklist) {
+      return this.findProcessById(process.id, currentUser);
     }
 
     const userName = currentUser.displayName || currentUser.login || 'Пользователь';
@@ -435,10 +447,25 @@ export class ProcessesService {
           changedAt: c.changedAt ?? now,
         })),
       };
-    } else {
+    } else if (prevText !== nextText) {
       diffData = this.buildDiffData(prevDoc, nextDoc, currentUser);
+    } else {
+      diffData = { changes: [] };
     }
-    await this.versionsRepo.save(
+    const checklistPayload =
+      hasChecklist
+        ? {
+            items: dto.checklist!.items
+              .filter((i) => i && typeof i.title === 'string' && (i.title as string).trim())
+              .map((i) => ({
+                title: (i.title as string).trim(),
+                assignee: typeof i.assignee === 'string' ? (i.assignee as string).trim() : undefined,
+                completed: false,
+              })),
+          }
+        : null;
+
+    const newVersion = await this.versionsRepo.save(
       this.versionsRepo.create({
         processId: process.id,
         version: nextVersion,
@@ -446,11 +473,21 @@ export class ProcessesService {
         diffData,
         diffDataCorrections: [],
         changedById: currentUser.id,
+        checklist: checklistPayload,
       }),
     );
     process.currentDescriptionDoc = nextDoc;
     await this.processesRepo.save(process);
     await this.upsertReadState(currentUser.id, process.id, nextVersion);
+    if (hasChecklist) {
+      await this.logProcessActivity({
+        processId: process.id,
+        userId: currentUser.id,
+        versionId: newVersion.id,
+        actionType: 'checklist_approved',
+        meta: { itemsCount: checklistPayload!.items.length },
+      });
+    }
     const recipients = await this.getUsersWithAccessToDepartment(process.departmentId);
     const recipientIds = recipients.filter((id) => id !== currentUser.id);
     if (recipientIds.length) {
@@ -462,29 +499,17 @@ export class ProcessesService {
         version: nextVersion,
       });
     }
-    return this.findProcessById(process.id);
+    return this.findProcessById(process.id, currentUser);
   }
 
   async approveProcess(processId: string, currentUser: User) {
-    const process = await this.ensureProcess(processId);
-    const latestVersion = await this.versionsRepo.findOne({
-      where: { processId: process.id },
-      order: { version: 'DESC' },
-    });
-    const latestVer = latestVersion?.version ?? 0;
-    const subscriberIds = await this.getUsersWithAccessToDepartment(process.departmentId);
-    if (subscriberIds.length > 0 && latestVer > 0) {
-      const readStates = await this.readStateRepo.find({
-        where: { processId: process.id, userId: In(subscriberIds) },
-        select: ['userId', 'lastReadVersion'],
-      });
-      const acknowledgedCount = readStates.filter((r) => r.lastReadVersion >= latestVer).length;
-      if (acknowledgedCount < subscriberIds.length && !this.canForceApprove(currentUser)) {
-        throw new ForbiddenException(
-          'Утвердить может только администратор или пользователь с правом «Процессы: утверждение»',
-        );
-      }
+    if (!this.canForceApprove(currentUser)) {
+      throw new ForbiddenException(
+        'Утвердить процесс может только администратор или пользователь с правом «Процессы: утверждение»',
+      );
     }
+    const process = await this.ensureProcess(processId);
+    await this.assertDepartmentAccessible(currentUser, process.departmentId);
     const nextVersionNo = await this.getNextVersionNo(processId);
     await this.versionsRepo.save(
       this.versionsRepo.create({
@@ -539,6 +564,67 @@ export class ProcessesService {
       relations: ['changedBy'],
       order: { version: 'DESC' },
     });
+  }
+
+  async suggestChecklists(
+    processId: string,
+    text: string,
+    currentUser: User,
+  ): Promise<{ items: ChecklistSuggestedItem[] }> {
+    const process = await this.ensureProcess(processId);
+    await this.assertDepartmentAccessible(currentUser, process.departmentId);
+    const items = await this.checklistAi.suggestChecklists(text || '');
+    return { items };
+  }
+
+  async getPolzaSettings(): Promise<{
+    apiKeyConfigured: boolean;
+    apiKeyMask?: string;
+    baseUrl?: string;
+    model?: string;
+    availableModels: string[];
+  }> {
+    const { apiKey, baseUrl, model } = await this.checklistAi.getPolzaConfig();
+    const availableModels = ['gpt-4o-mini', 'gpt-4o', 'gpt-4o-nano', 'gpt-3.5-turbo'];
+    return {
+      apiKeyConfigured: !!apiKey,
+      apiKeyMask: apiKey ? `***${apiKey.slice(-4)}` : undefined,
+      baseUrl,
+      model,
+      availableModels,
+    };
+  }
+
+  async updatePolzaSettings(dto: {
+    apiKey?: string;
+    baseUrl?: string;
+    model?: string;
+  }): Promise<{ apiKeyConfigured: boolean; apiKeyMask?: string; baseUrl?: string; model?: string }> {
+    if (dto.apiKey !== undefined) {
+      if (dto.apiKey.trim()) {
+        await this.settingsRepo.save({ key: PROCESS_POLZA_API_KEY, value: dto.apiKey.trim() });
+      } else {
+        await this.settingsRepo.delete({ key: PROCESS_POLZA_API_KEY }).catch(() => {});
+      }
+    }
+    if (dto.baseUrl !== undefined) {
+      const v = dto.baseUrl.trim();
+      if (v) {
+        await this.settingsRepo.save({ key: PROCESS_POLZA_BASE_URL, value: v });
+      } else {
+        await this.settingsRepo.delete({ key: PROCESS_POLZA_BASE_URL }).catch(() => {});
+      }
+    }
+    if (dto.model !== undefined && dto.model.trim()) {
+      await this.settingsRepo.save({ key: PROCESS_POLZA_MODEL, value: dto.model.trim() });
+    }
+    const { apiKey, baseUrl, model } = await this.checklistAi.getPolzaConfig();
+    return {
+      apiKeyConfigured: !!apiKey,
+      apiKeyMask: apiKey ? `***${apiKey.slice(-4)}` : undefined,
+      baseUrl,
+      model,
+    };
   }
 
   async getVersion(processId: string, versionId: string, currentUser?: User) {
@@ -899,12 +985,12 @@ export class ProcessesService {
 
   private async getAcknowledgmentStats(
     processId: string,
-  ): Promise<{ total: number; acknowledged: number }> {
+  ): Promise<{ total: number; acknowledged: number; notAcknowledgedUserNames: string[] }> {
     const process = await this.processesRepo.findOne({
       where: { id: processId },
       select: ['departmentId'],
     });
-    if (!process) return { total: 0, acknowledged: 0 };
+    if (!process) return { total: 0, acknowledged: 0, notAcknowledgedUserNames: [] };
     const latestVersion = await this.versionsRepo.findOne({
       where: { processId },
       order: { version: 'DESC' },
@@ -912,13 +998,25 @@ export class ProcessesService {
     });
     const latestVer = latestVersion?.version ?? 0;
     const subscriberIds = await this.getUsersWithAccessToDepartment(process.departmentId);
-    if (subscriberIds.length === 0) return { total: 0, acknowledged: 0 };
+    if (subscriberIds.length === 0) return { total: 0, acknowledged: 0, notAcknowledgedUserNames: [] };
     const readStates = await this.readStateRepo.find({
       where: { processId, userId: In(subscriberIds) },
       select: ['userId', 'lastReadVersion'],
     });
-    const acknowledged = readStates.filter((r) => r.lastReadVersion >= latestVer).length;
-    return { total: subscriberIds.length, acknowledged };
+    const acknowledgedSet = new Set(
+      readStates.filter((r) => r.lastReadVersion >= latestVer).map((r) => r.userId),
+    );
+    const acknowledged = acknowledgedSet.size;
+    const notAcknowledgedIds = subscriberIds.filter((id) => !acknowledgedSet.has(id));
+    let notAcknowledgedUserNames: string[] = [];
+    if (notAcknowledgedIds.length > 0) {
+      const users = await this.usersRepo.find({
+        where: { id: In(notAcknowledgedIds) },
+        select: ['displayName', 'login'],
+      });
+      notAcknowledgedUserNames = users.map((u) => (u.displayName && u.displayName.trim() ? u.displayName.trim() : u.login));
+    }
+    return { total: subscriberIds.length, acknowledged, notAcknowledgedUserNames };
   }
 
   private async getAccessibleDepartmentIds(currentUser: User): Promise<Set<string> | null> {
