@@ -20,6 +20,10 @@ export class CreateVersionDto {
   @IsOptional()
   @IsObject()
   checklist?: {
-    items: Array<{ title: string; assignee?: string }>;
+    items?: Array<{ title: string; assignee?: string }>;
+    checklistsByRole?: Array<{
+      role: string;
+      sections: Array<{ title: string; items: Array<{ title: string }> }>;
+    }>;
   };
 }
