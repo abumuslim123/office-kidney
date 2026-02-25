@@ -45,6 +45,13 @@ export class ProcessVersion {
 
   @Column({ type: 'jsonb', nullable: true })
   checklist: {
-    items: Array<{ id?: string; title: string; assignee?: string; completed?: boolean }>;
+    items?: Array<{ id?: string; title: string; assignee?: string; completed?: boolean }>;
+    checklistsByRole?: Array<{
+      role: string;
+      sections: Array<{
+        title: string;
+        items: Array<{ title: string; completed?: boolean }>;
+      }>;
+    }>;
   } | null;
 }

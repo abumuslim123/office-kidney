@@ -27,7 +27,7 @@ import { Process } from './entities/process.entity';
 import { ProcessReadState } from './entities/process-read-state.entity';
 import { ProcessVersion } from './entities/process-version.entity';
 import { PushNotificationsService } from './push-notifications.service';
-import { ChecklistAiService, ChecklistSuggestedItem } from './checklist-ai.service';
+import { ChecklistAiService } from './checklist-ai.service';
 import { AppSetting } from '../settings/entities/app-setting.entity';
 import {
   PROCESS_POLZA_API_KEY,
@@ -47,6 +47,10 @@ type DiffChange = {
 type DiffData = {
   changes: DiffChange[];
 };
+
+const TAGGED_DEL = 'taggedDeleted';
+const TAGGED_CHANGE = 'taggedChanged';
+const TAGGED_NEW = 'taggedNew';
 
 @Injectable()
 export class ProcessesService {
@@ -271,6 +275,17 @@ export class ProcessesService {
         ? { version: latest.version }
         : null,
     });
+    const stats = await this.getAcknowledgmentStats(processId);
+    if (
+      stats.acknowledged === stats.total &&
+      stats.total > 0 &&
+      this.hasDocTaggedMarks(process.currentDescriptionDoc)
+    ) {
+      process.currentDescriptionDoc = this.flattenDescriptionDoc(
+        process.currentDescriptionDoc as Record<string, unknown>,
+      );
+      await this.processesRepo.save(process);
+    }
     return { success: true };
   }
 
@@ -428,7 +443,11 @@ export class ProcessesService {
     const prevDoc = lastVersion?.descriptionDoc ?? process.currentDescriptionDoc;
     const prevText = this.extractText(prevDoc);
     const nextText = this.extractText(nextDoc);
-    const hasChecklist = Array.isArray(dto.checklist?.items) && dto.checklist.items.length > 0;
+    const hasChecklistByRole =
+      Array.isArray(dto.checklist?.checklistsByRole) && dto.checklist.checklistsByRole.length > 0;
+    const hasChecklistItems =
+      Array.isArray(dto.checklist?.items) && dto.checklist.items.length > 0;
+    const hasChecklist = hasChecklistByRole || hasChecklistItems;
     if (prevText === nextText && !hasChecklist) {
       return this.findProcessById(process.id, currentUser);
     }
@@ -452,18 +471,33 @@ export class ProcessesService {
     } else {
       diffData = { changes: [] };
     }
-    const checklistPayload =
-      hasChecklist
-        ? {
-            items: dto.checklist!.items
-              .filter((i) => i && typeof i.title === 'string' && (i.title as string).trim())
+    let checklistPayload: ProcessVersion['checklist'] = null;
+    if (hasChecklistByRole) {
+      checklistPayload = {
+        checklistsByRole: dto.checklist!.checklistsByRole!.map((cr) => ({
+          role: typeof cr.role === 'string' ? cr.role.trim() : '',
+          sections: (Array.isArray(cr.sections) ? cr.sections : []).map((sec) => ({
+            title: typeof sec.title === 'string' ? sec.title.trim() : '',
+            items: (Array.isArray(sec.items) ? sec.items : [])
+              .filter((i) => i && typeof (i && (i as { title?: string }).title) === 'string')
               .map((i) => ({
-                title: (i.title as string).trim(),
-                assignee: typeof i.assignee === 'string' ? (i.assignee as string).trim() : undefined,
+                title: ((i as { title: string }).title as string).trim(),
                 completed: false,
               })),
-          }
-        : null;
+          })),
+        })),
+      };
+    } else if (hasChecklistItems) {
+      checklistPayload = {
+        items: dto.checklist!.items!
+          .filter((i) => i && typeof i.title === 'string' && (i.title as string).trim())
+          .map((i) => ({
+            title: (i.title as string).trim(),
+            assignee: typeof i.assignee === 'string' ? (i.assignee as string).trim() : undefined,
+            completed: false,
+          })),
+      };
+    }
 
     const newVersion = await this.versionsRepo.save(
       this.versionsRepo.create({
@@ -479,13 +513,19 @@ export class ProcessesService {
     process.currentDescriptionDoc = nextDoc;
     await this.processesRepo.save(process);
     await this.upsertReadState(currentUser.id, process.id, nextVersion);
-    if (hasChecklist) {
+    if (hasChecklist && checklistPayload) {
+      const itemsCount = checklistPayload.checklistsByRole
+        ? checklistPayload.checklistsByRole.reduce(
+            (sum, cr) => sum + cr.sections.reduce((s, sec) => s + sec.items.length, 0),
+            0,
+          )
+        : (checklistPayload.items?.length ?? 0);
       await this.logProcessActivity({
         processId: process.id,
         userId: currentUser.id,
         versionId: newVersion.id,
         actionType: 'checklist_approved',
-        meta: { itemsCount: checklistPayload!.items.length },
+        meta: { itemsCount },
       });
     }
     const recipients = await this.getUsersWithAccessToDepartment(process.departmentId);
@@ -568,13 +608,12 @@ export class ProcessesService {
 
   async suggestChecklists(
     processId: string,
-    text: string,
+    dto: { text: string; exampleText?: string },
     currentUser: User,
-  ): Promise<{ items: ChecklistSuggestedItem[] }> {
+  ) {
     const process = await this.ensureProcess(processId);
     await this.assertDepartmentAccessible(currentUser, process.departmentId);
-    const items = await this.checklistAi.suggestChecklists(text || '');
-    return { items };
+    return this.checklistAi.suggestChecklists(dto.text || '', dto.exampleText);
   }
 
   async getPolzaSettings(): Promise<{
@@ -585,7 +624,26 @@ export class ProcessesService {
     availableModels: string[];
   }> {
     const { apiKey, baseUrl, model } = await this.checklistAi.getPolzaConfig();
-    const availableModels = ['gpt-4o-mini', 'gpt-4o', 'gpt-4o-nano', 'gpt-3.5-turbo'];
+    const availableModels = [
+      'gpt-4o-mini',
+      'gpt-4o',
+      'gpt-4o-nano',
+      'gpt-3.5-turbo',
+      'gpt-4-turbo',
+      'gpt-4',
+      'gpt-4.1',
+      'gpt-4.1-mini',
+      'gpt-4.1-nano',
+      'gpt-5',
+      'gpt-5-mini',
+      'gpt-5-nano',
+      'openai/gpt-5.1',
+      'gpt-5.1',
+      'o1',
+      'o1-mini',
+      'o3',
+      'o4-mini',
+    ];
     return {
       apiKeyConfigured: !!apiKey,
       apiKeyMask: apiKey ? `***${apiKey.slice(-4)}` : undefined,
@@ -653,18 +711,21 @@ export class ProcessesService {
     const process = await this.ensureProcess(processId);
     const targetVersion = await this.getVersion(processId, versionId);
     const nextVersionNo = await this.getNextVersionNo(processId);
+    const flattenedDoc = this.flattenDescriptionDoc(
+      targetVersion.descriptionDoc as Record<string, unknown>,
+    );
     const diffData = this.buildDiffData(
       process.currentDescriptionDoc,
-      targetVersion.descriptionDoc,
+      flattenedDoc,
       currentUser,
     );
-    process.currentDescriptionDoc = targetVersion.descriptionDoc;
+    process.currentDescriptionDoc = flattenedDoc;
     await this.processesRepo.save(process);
     await this.versionsRepo.save(
       this.versionsRepo.create({
         processId,
         version: nextVersionNo,
-        descriptionDoc: targetVersion.descriptionDoc,
+        descriptionDoc: flattenedDoc,
         diffData,
         diffDataCorrections: [],
         changedById: currentUser.id,
@@ -695,6 +756,18 @@ export class ProcessesService {
       note: c.note,
     }));
     return this.versionsRepo.save(version);
+  }
+
+  async deleteVersion(processId: string, versionId: string, currentUser: User) {
+    const process = await this.ensureProcess(processId);
+    await this.assertDepartmentAccessible(currentUser, process.departmentId);
+    const version = await this.versionsRepo.findOne({
+      where: { id: versionId, processId },
+    });
+    if (!version) throw new NotFoundException('Версия не найдена');
+    await this.activityLogRepo.update({ versionId: version.id }, { versionId: null });
+    await this.versionsRepo.remove(version);
+    return { success: true };
   }
 
   async uploadAttachment(processId: string, file: Express.Multer.File, currentUser: User) {
@@ -969,6 +1042,103 @@ export class ProcessesService {
     };
     walk(doc);
     return out.join(' ').replace(/\s+/g, ' ').trim();
+  }
+
+  private hasDocTaggedMarks(doc: Record<string, unknown> | null | undefined): boolean {
+    if (!doc || typeof doc !== 'object') return false;
+    const pmDoc = (doc.doc as Record<string, unknown> | undefined) ?? doc;
+    const walk = (node: unknown): boolean => {
+      if (!node || typeof node !== 'object') return false;
+      const n = node as Record<string, unknown>;
+      const marks = n.marks as Array<{ type?: string }> | undefined;
+      if (Array.isArray(marks)) {
+        const hasTagged = marks.some(
+          (m) =>
+            m?.type === TAGGED_DEL || m?.type === TAGGED_CHANGE || m?.type === TAGGED_NEW,
+        );
+        if (hasTagged) return true;
+      }
+      const content = n.content as unknown[] | undefined;
+      if (Array.isArray(content)) {
+        for (const child of content) {
+          if (walk(child)) return true;
+        }
+      }
+      return false;
+    };
+    return walk(pmDoc);
+  }
+
+  private flattenDescriptionDoc(doc: Record<string, unknown>): Record<string, unknown> {
+    if (!this.hasDocTaggedMarks(doc)) {
+      return JSON.parse(JSON.stringify(doc));
+    }
+    const hasTaggedMark = (marks: unknown[], name: string): boolean => {
+      if (!Array.isArray(marks)) return false;
+      return marks.some(
+        (m) =>
+          typeof m === 'object' && m !== null && (m as Record<string, unknown>).type === name,
+      );
+    };
+    const filterTaggedMarks = (marks: unknown[]): unknown[] => {
+      if (!Array.isArray(marks)) return [];
+      return marks.filter((m) => {
+        const t = typeof m === 'object' && m !== null ? (m as Record<string, unknown>).type : undefined;
+        return t !== TAGGED_DEL && t !== TAGGED_CHANGE && t !== TAGGED_NEW;
+      });
+    };
+    const isEmptyNode = (node: unknown): boolean => {
+      if (!node || typeof node !== 'object') return true;
+      const n = node as Record<string, unknown>;
+      const text = n.text;
+      if (typeof text === 'string') return text.trim() === '';
+      const content = n.content as unknown[] | undefined;
+      if (Array.isArray(content)) {
+        if (content.length === 0) return true;
+        return content.every((child) => isEmptyNode(child));
+      }
+      return true;
+    };
+    const containerTypesFilterEmpty = ['doc', 'orderedList', 'bulletList', 'listItem'];
+    const flattenContent = (nodes: unknown[]): unknown[] => {
+      const result: unknown[] = [];
+      for (const node of nodes) {
+        if (!node || typeof node !== 'object') {
+          result.push(node);
+          continue;
+        }
+        const n = node as Record<string, unknown>;
+        const content = n.content as unknown[] | undefined;
+        if (Array.isArray(content)) {
+          let newContent = flattenContent(content);
+          if (containerTypesFilterEmpty.includes((n.type as string) ?? '')) {
+            newContent = newContent.filter((child) => !isEmptyNode(child));
+          }
+          result.push({ ...n, content: newContent });
+          continue;
+        }
+        const text = n.text;
+        if (typeof text === 'string') {
+          const marks = (n.marks as unknown[]) ?? [];
+          if (hasTaggedMark(marks, TAGGED_DEL)) continue;
+          result.push({
+            ...n,
+            marks: filterTaggedMarks(marks),
+          });
+          continue;
+        }
+        result.push({ ...n });
+      }
+      return result;
+    };
+    const inner = (doc.doc as Record<string, unknown> | undefined) ?? doc;
+    const content = Array.isArray(inner.content) ? (inner.content as unknown[]) : [];
+    let newContent = flattenContent(content);
+    if ((inner.type as string) === 'doc') {
+      newContent = newContent.filter((child) => !isEmptyNode(child));
+    }
+    const newInner = { ...inner, content: newContent };
+    return doc.doc !== undefined ? { doc: newInner } : newInner;
   }
 
   private hasPermission(user: User, slug: string): boolean {

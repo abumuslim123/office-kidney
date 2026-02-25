@@ -180,7 +180,7 @@ export class ProcessesController {
     @Body() dto: SuggestChecklistsDto,
     @CurrentUser() user: User,
   ) {
-    return this.processes.suggestChecklists(processId, dto.text, user);
+    return this.processes.suggestChecklists(processId, dto, user);
   }
 
   @Post(':id/approve')
@@ -265,6 +265,16 @@ export class ProcessesController {
     @Body() dto: UpdateVersionCorrectionsDto,
   ) {
     return this.processes.updateVersionCorrections(processId, versionId, dto);
+  }
+
+  @Delete(':id/versions/:versionId')
+  @Permissions('processes_edit')
+  deleteVersion(
+    @Param('id') processId: string,
+    @Param('versionId') versionId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.processes.deleteVersion(processId, versionId, user);
   }
 
   @Post(':id/attachments')

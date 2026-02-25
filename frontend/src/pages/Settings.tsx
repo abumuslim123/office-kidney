@@ -143,7 +143,12 @@ export default function Settings() {
                   onChange={(e) => setModel(e.target.value)}
                   className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
                 >
-                  {(polzaSettings?.availableModels || ['gpt-4o-mini', 'gpt-4o', 'gpt-4o-nano', 'gpt-3.5-turbo']).map((opt) => (
+                  {(polzaSettings?.availableModels || [
+                    'gpt-4o-mini', 'gpt-4o', 'gpt-4o-nano', 'gpt-3.5-turbo',
+                    'gpt-4-turbo', 'gpt-4', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano',
+                    'gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'openai/gpt-5.1', 'gpt-5.1',
+                    'o1', 'o1-mini', 'o3', 'o4-mini',
+                  ]).map((opt) => (
                     <option key={opt} value={opt}>
                       {opt}
                     </option>

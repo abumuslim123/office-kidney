@@ -1,4 +1,14 @@
+import * as path from 'path';
+import * as fs from 'fs';
 import { DataSource } from 'typeorm';
+
+const envPath = path.join(__dirname, '../../.env');
+if (fs.existsSync(envPath)) {
+  for (const line of fs.readFileSync(envPath, 'utf8').split('\n')) {
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (m) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '').trim();
+  }
+}
 
 export const AppDataSource = new DataSource({
   type: 'postgres',

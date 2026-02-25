@@ -25,6 +25,11 @@ type ProcessItem = {
   hasUnread?: boolean;
 };
 
+type ChecklistByRole = {
+  role: string;
+  sections: Array<{ title: string; items: string[] }>;
+};
+
 type ProcessVersion = {
   id: string;
   version: number;
@@ -33,7 +38,11 @@ type ProcessVersion = {
   changedAt: string;
   changedBy?: { id: string; displayName?: string; login?: string } | null;
   checklist?: {
-    items: Array<{ title: string; assignee?: string; completed?: boolean }>;
+    items?: Array<{ title: string; assignee?: string; completed?: boolean }>;
+    checklistsByRole?: Array<{
+      role: string;
+      sections: Array<{ title: string; items: Array<{ title: string; completed?: boolean }> }>;
+    }>;
   } | null;
 };
 
@@ -77,6 +86,249 @@ type AssignableUser = {
 function formatDate(value?: string): string {
   if (!value) return '—';
   return new Date(value).toLocaleString('ru-RU');
+}
+
+function ChecklistByRoleAccordion({
+  checklistsByRole,
+  className = '',
+  title,
+}: {
+  checklistsByRole: Array<{
+    role: string;
+    sections: Array<{ title: string; items: Array<{ title: string; completed?: boolean }> }>;
+  }>;
+  className?: string;
+  title: string;
+}) {
+  const [expandedRoleIndex, setExpandedRoleIndex] = useState<number | null>(null);
+  return (
+    <div className={className}>
+      {title ? <h4 className="text-sm font-medium text-gray-700 mb-2">{title}</h4> : null}
+      <div className="space-y-1">
+        {checklistsByRole.map((cr, roleIdx) => (
+          <div key={roleIdx} className="border border-gray-200 rounded overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setExpandedRoleIndex((i) => (i === roleIdx ? null : roleIdx))}
+              className="w-full text-left px-3 py-2 text-sm font-medium text-gray-800 bg-gray-50 hover:bg-gray-100 flex items-center justify-between"
+            >
+              <span>Чек-лист — {cr.role}</span>
+              <span className="text-gray-500">{expandedRoleIndex === roleIdx ? '▼' : '▶'}</span>
+            </button>
+            {expandedRoleIndex === roleIdx && (
+              <div className="px-3 py-2 bg-white border-t border-gray-200 space-y-3">
+                {cr.sections.map((sec, secIdx) => (
+                  <div key={secIdx}>
+                    <p className="text-xs font-medium text-gray-600 mb-1">{sec.title}</p>
+                    <ul className="space-y-1 list-disc list-inside text-sm text-gray-700">
+                      {sec.items.map((it, itemIdx) => (
+                        <li key={itemIdx} className="flex items-center gap-2">
+                          <span className="flex-shrink-0 text-gray-500">
+                            {it.completed === true ? '✓' : '○'}
+                          </span>
+                          <span className={it.completed === true ? 'text-gray-500 line-through' : ''}>
+                            {it.title}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EditableChecklistByRole({
+  value,
+  onChange,
+  className = '',
+}: {
+  value: ChecklistByRole[];
+  onChange: (value: ChecklistByRole[]) => void;
+  className?: string;
+}) {
+  const [expandedRoleIndex, setExpandedRoleIndex] = useState<number | null>(0);
+
+  const updateRole = (roleIdx: number, role: string) => {
+    const next = value.map((cr, i) => (i === roleIdx ? { ...cr, role } : cr));
+    onChange(next);
+  };
+  const updateSectionTitle = (roleIdx: number, secIdx: number, title: string) => {
+    const next = value.map((cr, i) =>
+      i === roleIdx
+        ? {
+            ...cr,
+            sections: cr.sections.map((s, j) => (j === secIdx ? { ...s, title } : s)),
+          }
+        : cr,
+    );
+    onChange(next);
+  };
+  const updateItem = (roleIdx: number, secIdx: number, itemIdx: number, title: string) => {
+    const next = value.map((cr, i) =>
+      i === roleIdx
+        ? {
+            ...cr,
+            sections: cr.sections.map((s, j) =>
+              j === secIdx
+                ? { ...s, items: s.items.map((it, k) => (k === itemIdx ? title : it)) }
+                : s,
+            ),
+          }
+        : cr,
+    );
+    onChange(next);
+  };
+  const addItem = (roleIdx: number, secIdx: number) => {
+    const next = value.map((cr, i) =>
+      i === roleIdx
+        ? {
+            ...cr,
+            sections: cr.sections.map((s, j) =>
+              j === secIdx ? { ...s, items: [...s.items, ''] } : s,
+            ),
+          }
+        : cr,
+    );
+    onChange(next);
+  };
+  const removeItem = (roleIdx: number, secIdx: number, itemIdx: number) => {
+    const next = value.map((cr, i) =>
+      i === roleIdx
+        ? {
+            ...cr,
+            sections: cr.sections.map((s, j) =>
+              j === secIdx ? { ...s, items: s.items.filter((_, k) => k !== itemIdx) } : s,
+            ),
+          }
+        : cr,
+    );
+    onChange(next);
+  };
+  const addSection = (roleIdx: number) => {
+    const next = value.map((cr, i) =>
+      i === roleIdx ? { ...cr, sections: [...cr.sections, { title: '', items: [''] }] } : cr,
+    );
+    onChange(next);
+  };
+  const removeSection = (roleIdx: number, secIdx: number) => {
+    const next = value.map((cr, i) =>
+      i === roleIdx ? { ...cr, sections: cr.sections.filter((_, j) => j !== secIdx) } : cr,
+    );
+    onChange(next);
+  };
+  const removeRole = (roleIdx: number) => {
+    onChange(value.filter((_, i) => i !== roleIdx));
+    if (expandedRoleIndex === roleIdx) setExpandedRoleIndex(null);
+    else if (expandedRoleIndex !== null && expandedRoleIndex > roleIdx)
+      setExpandedRoleIndex(expandedRoleIndex - 1);
+  };
+
+  return (
+    <div className={className}>
+      <p className="text-xs text-gray-500 mb-2">Отредактируйте при необходимости и нажмите «Утвердить».</p>
+      <div className="space-y-1">
+        {value.map((cr, roleIdx) => (
+          <div key={roleIdx} className="border border-gray-200 rounded overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 bg-gray-50">
+              <button
+                type="button"
+                onClick={() => setExpandedRoleIndex((i) => (i === roleIdx ? null : roleIdx))}
+                className="shrink-0 text-gray-500 hover:text-gray-700 p-0.5"
+                title={expandedRoleIndex === roleIdx ? 'Свернуть' : 'Развернуть'}
+              >
+                {expandedRoleIndex === roleIdx ? '▼' : '▶'}
+              </button>
+              <input
+                type="text"
+                value={cr.role}
+                onChange={(e) => updateRole(roleIdx, e.target.value)}
+                className="flex-1 min-w-0 px-2 py-1 text-sm font-medium text-gray-800 border border-gray-300 rounded"
+                placeholder="Чек-лист — роль / должность"
+              />
+              {value.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => removeRole(roleIdx)}
+                  className="text-red-600 hover:text-red-800 text-xs px-1"
+                  title="Удалить чек-лист этой роли"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+            {expandedRoleIndex === roleIdx && (
+              <div className="px-3 py-2 bg-white space-y-4">
+                {cr.sections.map((sec, secIdx) => (
+                  <div key={secIdx} className="border-l-2 border-gray-200 pl-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <input
+                        type="text"
+                        value={sec.title}
+                        onChange={(e) => updateSectionTitle(roleIdx, secIdx, e.target.value)}
+                        className="flex-1 px-2 py-1 text-xs font-medium text-gray-700 border border-gray-300 rounded"
+                        placeholder="Название секции"
+                      />
+                      {cr.sections.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeSection(roleIdx, secIdx)}
+                          className="text-red-600 hover:text-red-800 text-xs"
+                          title="Удалить секцию"
+                        >
+                          Удалить секцию
+                        </button>
+                      )}
+                    </div>
+                    <ul className="space-y-1.5">
+                      {sec.items.map((it, itemIdx) => (
+                        <li key={itemIdx} className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={it}
+                            onChange={(e) => updateItem(roleIdx, secIdx, itemIdx, e.target.value)}
+                            className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded"
+                            placeholder="Пункт"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeItem(roleIdx, secIdx, itemIdx)}
+                            className="text-red-600 hover:text-red-800 text-xs shrink-0"
+                            title="Удалить пункт"
+                          >
+                            ✕
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                    <button
+                      type="button"
+                      onClick={() => addItem(roleIdx, secIdx)}
+                      className="mt-1 text-xs text-gray-600 hover:text-gray-800"
+                    >
+                      + Добавить пункт
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => addSection(roleIdx)}
+                  className="text-xs text-gray-600 hover:text-gray-800"
+                >
+                  + Добавить секцию
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function getActivityActionText(item: ProcessActivityItem): string {
@@ -156,6 +408,7 @@ export default function Processes() {
   const lastActivitySearchRef = useRef<string | undefined>(undefined);
   const [showChecklistBlock, setShowChecklistBlock] = useState(false);
   const [checklistDocDraft, setChecklistDocDraft] = useState<Record<string, unknown> | null>(null);
+  const [checklistStructuredDraft, setChecklistStructuredDraft] = useState<ChecklistByRole[] | null>(null);
   const [checklistLoading, setChecklistLoading] = useState(false);
   const [checklistError, setChecklistError] = useState('');
   const [checklistSaving, setChecklistSaving] = useState(false);
@@ -546,6 +799,17 @@ export default function Processes() {
     await loadProcess(selectedProcess.id);
   };
 
+  const deleteVersion = async () => {
+    if (!selectedProcess || !selectedVersion || !canEdit) return;
+    if (!window.confirm(`Удалить версию #${selectedVersion.version} из истории?`)) return;
+    try {
+      await api.delete(`/processes/${selectedProcess.id}/versions/${selectedVersion.id}`);
+      await loadProcess(selectedProcess.id);
+    } catch {
+      setError('Не удалось удалить версию');
+    }
+  };
+
   const openVersionInHistory = async (versionId: string) => {
     if (!selectedProcess) return;
     setSelectedVersionId(versionId);
@@ -628,13 +892,6 @@ export default function Processes() {
     }
   };
 
-  function itemsToChecklistText(items: { title: string; assignee?: string }[]): string {
-    return items
-      .map((i) => (i.assignee?.trim() ? `${i.title.trim()} (${i.assignee.trim()})` : i.title.trim()))
-      .filter(Boolean)
-      .join('\n');
-  }
-
   function parseChecklistText(text: string): { title: string; assignee?: string }[] {
     return text
       .split(/\n/)
@@ -673,6 +930,7 @@ export default function Processes() {
     setShowChecklistBlock(true);
     setChecklistError('');
     setChecklistDocDraft(emptyChecklistDoc);
+    setChecklistStructuredDraft(null);
     const doc =
       isIterationMode ? iterationDocDraft : (editDocDraft ?? selectedProcess.currentDescriptionDoc ?? null);
     const text = getTextExcludingDeleted(doc);
@@ -682,12 +940,18 @@ export default function Processes() {
     }
     setChecklistLoading(true);
     try {
-      const res = await api.post<{ items: { title: string; assignee?: string }[] }>(
+      const res = await api.post<{ checklists: ChecklistByRole[] }>(
         `/processes/${selectedProcess.id}/suggest-checklists`,
         { text },
       );
-      const items = Array.isArray(res.data?.items) ? res.data.items : [];
-      setChecklistDocDraft(textToChecklistDoc(itemsToChecklistText(items)));
+      const checklists = Array.isArray(res.data?.checklists) ? res.data.checklists : [];
+      if (checklists.length > 0) {
+        setChecklistStructuredDraft(checklists);
+        setChecklistDocDraft(emptyChecklistDoc);
+      } else {
+        setChecklistStructuredDraft(null);
+        setChecklistDocDraft(emptyChecklistDoc);
+      }
     } catch (err: unknown) {
       const msg =
         err && typeof err === 'object' && 'response' in err &&
@@ -712,12 +976,18 @@ export default function Processes() {
     }
     setChecklistLoading(true);
     try {
-      const res = await api.post<{ items: { title: string; assignee?: string }[] }>(
+      const res = await api.post<{ checklists: ChecklistByRole[] }>(
         `/processes/${selectedProcess.id}/suggest-checklists`,
         { text },
       );
-      const items = Array.isArray(res.data?.items) ? res.data.items : [];
-      setChecklistDocDraft(textToChecklistDoc(itemsToChecklistText(items)));
+      const checklists = Array.isArray(res.data?.checklists) ? res.data.checklists : [];
+      if (checklists.length > 0) {
+        setChecklistStructuredDraft(checklists);
+        setChecklistDocDraft(emptyChecklistDoc);
+      } else {
+        setChecklistStructuredDraft(null);
+        setChecklistDocDraft(emptyChecklistDoc);
+      }
     } catch (err: unknown) {
       const msg =
         err && typeof err === 'object' && 'response' in err &&
@@ -731,18 +1001,31 @@ export default function Processes() {
   };
 
   const approveChecklist = async () => {
+    const structured = checklistStructuredDraft && checklistStructuredDraft.length > 0;
     const text = getChecklistTextFromDoc(checklistDocDraft);
     const items = parseChecklistText(text);
-    if (!selectedProcess || !canEdit || !items.length) return;
+    if (!selectedProcess || !canEdit) return;
+    if (!structured && !items.length) return;
     const doc =
       isIterationMode ? iterationDocDraft : (editDocDraft ?? selectedProcess.currentDescriptionDoc ?? null);
     const descriptionDoc = doc && typeof doc === 'object' ? (doc.doc != null ? { doc: doc.doc } : { doc: doc }) : { doc: selectedProcess.currentDescriptionDoc?.doc ?? {} };
     setChecklistSaving(true);
     setChecklistError('');
     try {
+      const checklistPayload = structured
+        ? {
+            checklistsByRole: checklistStructuredDraft!.map((cr) => ({
+              role: cr.role,
+              sections: cr.sections.map((sec) => ({
+                title: sec.title,
+                items: sec.items.map((title) => ({ title })),
+              })),
+            })),
+          }
+        : { items };
       await api.post(`/processes/${selectedProcess.id}/versions`, {
         descriptionDoc,
-        checklist: { items },
+        checklist: checklistPayload,
       });
       await Promise.all([
         loadProcess(selectedProcess.id),
@@ -751,6 +1034,7 @@ export default function Processes() {
       ]);
       setShowChecklistBlock(false);
       setChecklistDocDraft(null);
+      setChecklistStructuredDraft(null);
     } catch (err: unknown) {
       const msg =
         err && typeof err === 'object' && 'response' in err &&
@@ -931,6 +1215,20 @@ export default function Processes() {
                               Не ознакомились: {(selectedProcess.acknowledgmentStats.notAcknowledgedUserNames ?? []).join(', ')}
                             </div>
                           )}
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-500">
+                          <span className="inline-flex items-center gap-1">
+                            <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: '#dc2626' }} />
+                            Удалено
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: '#d97706' }} />
+                            Изменено
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: '#16a34a' }} />
+                            Добавлено
+                          </span>
+                        </div>
                       </div>
                     )}
                 </div>
@@ -1076,58 +1374,97 @@ export default function Processes() {
                 }}
               />
 
-              {selectedProcess?.latestVersion?.checklist?.items?.length ? (
-                <div className="mt-4 border border-gray-200 rounded-lg p-3">
-                  <h4 className="text-sm font-medium text-gray-700 mb-2">Текущий чек-лист</h4>
-                  <ul className="space-y-1.5">
-                    {selectedProcess.latestVersion.checklist.items.map((it, idx) => (
-                      <li key={idx} className="flex items-center gap-2 text-sm">
-                        <span className="flex-shrink-0 text-gray-500">
-                          {it.completed === true ? '✓' : '○'}
-                        </span>
-                        <span className={it.completed === true ? 'text-gray-500 line-through' : ''}>
-                          {it.title}
-                        </span>
-                        {it.assignee && (
-                          <span className="text-gray-500 text-xs">({it.assignee})</span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+              {selectedProcess?.latestVersion?.checklist ? (
+                (() => {
+                  const cl = selectedProcess.latestVersion.checklist;
+                  const byRole = cl.checklistsByRole && cl.checklistsByRole.length > 0;
+                  if (byRole) {
+                    return (
+                      <ChecklistByRoleAccordion
+                        checklistsByRole={cl.checklistsByRole!}
+                        className="mt-4 border border-gray-200 rounded-lg p-3"
+                        title="Текущий чек-лист"
+                      />
+                    );
+                  }
+                  if (cl.items?.length) {
+                    return (
+                      <div className="mt-4 border border-gray-200 rounded-lg p-3">
+                        <h4 className="text-sm font-medium text-gray-700 mb-2">Текущий чек-лист</h4>
+                        <ul className="space-y-1.5">
+                          {cl.items.map((it, idx) => (
+                            <li key={idx} className="flex items-center gap-2 text-sm">
+                              <span className="flex-shrink-0 text-gray-500">
+                                {it.completed === true ? '✓' : '○'}
+                              </span>
+                              <span className={it.completed === true ? 'text-gray-500 line-through' : ''}>
+                                {it.title}
+                              </span>
+                              {it.assignee && (
+                                <span className="text-gray-500 text-xs">({it.assignee})</span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()
               ) : null}
 
               {showChecklistBlock && selectedProcess && canEdit && (
                 <div className="mt-4 border border-gray-200 rounded-lg p-4 bg-gray-50/50">
                   <h4 className="text-sm font-medium text-gray-700 mb-2">Чек-лист</h4>
-                  <p className="text-xs text-gray-500 mb-2">
-                    Один пункт на строку. Ответственного можно указать в скобках: Пункт (Имя). Поле редактируется так же, как описание процесса.
-                  </p>
                   {checklistError && (
                     <p className="text-sm text-red-600 mb-2">{checklistError}</p>
                   )}
                   {checklistLoading ? (
                     <p className="text-sm text-gray-500 mb-2">Загрузка предложений...</p>
                   ) : null}
-                  <ProcessesEditor
-                    editable={true}
-                    contentDoc={checklistDocDraft ?? emptyChecklistDoc}
-                    onChange={({ doc }) => setChecklistDocDraft(doc)}
-                    minHeightClassName="min-h-[120px]"
-                  />
+                  {checklistStructuredDraft && checklistStructuredDraft.length > 0 ? (
+                    <EditableChecklistByRole
+                      value={checklistStructuredDraft}
+                      onChange={setChecklistStructuredDraft}
+                      className="mb-3"
+                    />
+                  ) : (
+                    <>
+                      <p className="text-xs text-gray-500 mb-2">
+                        Один пункт на строку. Ответственного можно указать в скобках: Пункт (Имя). Или нажмите «Сгенерировать» для чек-листов по ролям.
+                      </p>
+                      <ProcessesEditor
+                        editable={true}
+                        contentDoc={checklistDocDraft ?? emptyChecklistDoc}
+                        onChange={({ doc }) => setChecklistDocDraft(doc)}
+                        minHeightClassName="min-h-[120px]"
+                      />
+                    </>
+                  )}
                   <div className="mt-2 flex flex-wrap gap-2">
                     <button
                       type="button"
                       onClick={fetchChecklistSuggestions}
                       disabled={checklistLoading}
-                      className="px-3 py-2 border border-gray-300 text-sm rounded hover:bg-gray-50 disabled:opacity-50"
+                      className="px-3 py-2 border border-gray-300 text-sm rounded hover:bg-gray-50 disabled:opacity-50 inline-flex items-center gap-2"
                     >
-                      {checklistLoading ? 'Загрузка...' : 'Сгенерировать'}
+                      {checklistLoading ? (
+                        <>
+                          <span className="inline-block w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" aria-hidden />
+                          Загрузка...
+                        </>
+                      ) : (
+                        'Сгенерировать'
+                      )}
                     </button>
                     <button
                       type="button"
                       onClick={approveChecklist}
-                      disabled={checklistSaving || !parseChecklistText(getChecklistTextFromDoc(checklistDocDraft)).length}
+                      disabled={
+                        checklistSaving ||
+                        (!(checklistStructuredDraft && checklistStructuredDraft.length > 0) &&
+                          !parseChecklistText(getChecklistTextFromDoc(checklistDocDraft)).length)
+                      }
                       className="px-3 py-2 bg-accent text-white text-sm rounded hover:bg-accent-hover disabled:opacity-50"
                     >
                       {checklistSaving ? 'Сохранение...' : 'Утвердить'}
@@ -1137,6 +1474,7 @@ export default function Processes() {
                       onClick={() => {
                         setShowChecklistBlock(false);
                         setChecklistDocDraft(null);
+                        setChecklistStructuredDraft(null);
                         setChecklistError('');
                       }}
                       className="px-3 py-2 border border-gray-300 text-sm rounded hover:bg-gray-50"
@@ -1448,6 +1786,15 @@ export default function Processes() {
                             Применить как актуальную
                           </button>
                         )}
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={deleteVersion}
+                            className="px-3 py-2 text-sm rounded border border-red-300 text-red-700 hover:bg-red-50"
+                          >
+                            Удалить
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -1485,7 +1832,7 @@ export default function Processes() {
                               {ch.changeType === 'modified' && ch.oldText && (
                                 <div>
                                   <span className="text-red-600 font-medium">Удалено: </span>
-                                  <span className="text-gray-600 line-through">
+                                  <span className="text-gray-600 line-through whitespace-pre-wrap break-words">
                                     {ch.oldText.length > 300 ? ch.oldText.slice(0, 300) + '...' : ch.oldText}
                                   </span>
                                 </div>
@@ -1493,7 +1840,7 @@ export default function Processes() {
                               {ch.newText && (
                                 <div className={ch.oldText ? 'mt-1' : ''}>
                                   <span className="text-green-600 font-medium">Добавлено: </span>
-                                  <span className="text-gray-800">
+                                  <span className="text-gray-800 whitespace-pre-wrap break-words">
                                     {ch.newText.length > 300 ? ch.newText.slice(0, 300) + '...' : ch.newText}
                                   </span>
                                 </div>
@@ -1515,7 +1862,7 @@ export default function Processes() {
                               {ch.changeType === 'modified' && ch.oldText && (
                                 <div>
                                   <span className="text-red-600 font-medium">Удалено: </span>
-                                  <span className="text-gray-600 line-through">
+                                  <span className="text-gray-600 line-through whitespace-pre-wrap break-words">
                                     {ch.oldText.length > 300 ? ch.oldText.slice(0, 300) + '...' : ch.oldText}
                                   </span>
                                 </div>
@@ -1523,7 +1870,7 @@ export default function Processes() {
                               {ch.newText && (
                                 <div className={ch.oldText ? 'mt-1' : ''}>
                                   <span className="text-green-600 font-medium">Добавлено: </span>
-                                  <span className="text-gray-800">
+                                  <span className="text-gray-800 whitespace-pre-wrap break-words">
                                     {ch.newText.length > 300 ? ch.newText.slice(0, 300) + '...' : ch.newText}
                                   </span>
                                 </div>
@@ -1534,23 +1881,42 @@ export default function Processes() {
                       </div>
                     ) : null}
 
-                    {selectedVersion.checklist?.items?.length ? (
-                      <div className="mb-3 border border-gray-200 rounded p-3">
-                        <p className="text-sm font-medium text-gray-700 mb-2">Чек-лист</p>
-                        <ul className="space-y-1">
-                          {selectedVersion.checklist.items.map((it, idx) => (
-                            <li key={idx} className="text-sm flex items-center gap-2">
-                              {it.completed === true ? (
-                                <span className="text-emerald-600" title="Выполнено">✓</span>
-                              ) : (
-                                <span className="text-gray-400">○</span>
-                              )}{' '}
-                              {it.title}
-                              {it.assignee && <span className="text-gray-500">— {it.assignee}</span>}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
+                    {selectedVersion.checklist ? (
+                      (() => {
+                        const cl = selectedVersion.checklist;
+                        if (cl.checklistsByRole && cl.checklistsByRole.length > 0) {
+                          return (
+                            <div className="mb-3">
+                              <ChecklistByRoleAccordion
+                                checklistsByRole={cl.checklistsByRole}
+                                className="border border-gray-200 rounded p-3"
+                                title="Чек-лист"
+                              />
+                            </div>
+                          );
+                        }
+                        if (cl.items?.length) {
+                          return (
+                            <div className="mb-3 border border-gray-200 rounded p-3">
+                              <p className="text-sm font-medium text-gray-700 mb-2">Чек-лист</p>
+                              <ul className="space-y-1">
+                                {cl.items.map((it, idx) => (
+                                  <li key={idx} className="text-sm flex items-center gap-2">
+                                    {it.completed === true ? (
+                                      <span className="text-emerald-600" title="Выполнено">✓</span>
+                                    ) : (
+                                      <span className="text-gray-400">○</span>
+                                    )}{' '}
+                                    {it.title}
+                                    {it.assignee && <span className="text-gray-500">— {it.assignee}</span>}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()
                     ) : null}
 
                     {!compareMode && (

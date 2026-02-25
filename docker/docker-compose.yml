@@ -40,6 +40,9 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-https://kidney-office.srvu.ru}
       API_BASE_URL: ${API_BASE_URL:-https://kidney-office.srvu.ru}
       SCREENS_APK_PATH: apk/kidney-office-tv.apk
+      SEED_ADMIN_LOGIN: ${SEED_ADMIN_LOGIN:-admin}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin123}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@localhost}
     volumes:
       - ../backend/apk:/app/apk:ro
       - ../backend/uploads:/app/uploads
