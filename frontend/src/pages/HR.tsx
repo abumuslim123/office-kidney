@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
-import { Link, NavLink, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import HrTabs from '../components/HrTabs';
 
 type HrFolder = {
   id: string;
@@ -215,25 +216,7 @@ export default function HR() {
   if (isFolderView) {
     return (
       <div>
-        <div className="flex gap-2 mb-4 border-b border-gray-200 pb-2">
-          <NavLink
-            to="/hr"
-            end
-            className={({ isActive }) =>
-              `px-3 py-2 rounded text-sm font-medium ${isActive ? 'bg-accent text-white' : 'text-gray-600 hover:bg-gray-100'}`
-            }
-          >
-            Списки
-          </NavLink>
-          <NavLink
-            to="/hr/events"
-            className={({ isActive }) =>
-              `px-3 py-2 rounded text-sm font-medium ${isActive ? 'bg-accent text-white' : 'text-gray-600 hover:bg-gray-100'}`
-            }
-          >
-            План мероприятий
-          </NavLink>
-        </div>
+        <HrTabs active="lists" />
         <div className="flex items-center gap-4 mb-6">
           <Link to="/hr" className="text-accent hover:underline text-sm">
             ← Назад к папкам
@@ -423,25 +406,7 @@ export default function HR() {
 
   return (
     <div>
-      <div className="flex gap-2 mb-4 border-b border-gray-200 pb-2">
-        <NavLink
-          to="/hr"
-          end
-          className={({ isActive }) =>
-            `px-3 py-2 rounded text-sm font-medium ${isActive ? 'bg-accent text-white' : 'text-gray-600 hover:bg-gray-100'}`
-          }
-        >
-          Списки
-        </NavLink>
-        <NavLink
-          to="/hr/events"
-          className={({ isActive }) =>
-            `px-3 py-2 rounded text-sm font-medium ${isActive ? 'bg-accent text-white' : 'text-gray-600 hover:bg-gray-100'}`
-          }
-        >
-          План мероприятий
-        </NavLink>
-      </div>
+      <HrTabs active="lists" />
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-semibold text-gray-900">HR — Папки</h2>
         <button

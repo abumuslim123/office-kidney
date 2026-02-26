@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link, NavLink } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
+import HrTabs from '../components/HrTabs';
 
 type HrEvent = {
   id: string;
@@ -226,25 +227,7 @@ export default function HrEvents() {
 
   return (
     <div>
-      <div className="flex gap-2 mb-4 border-b border-gray-200 pb-2">
-        <NavLink
-          to="/hr"
-          end
-          className={({ isActive }) =>
-            `px-3 py-2 rounded text-sm font-medium ${isActive ? 'bg-accent text-white' : 'text-gray-600 hover:bg-gray-100'}`
-          }
-        >
-          Списки
-        </NavLink>
-        <NavLink
-          to="/hr/events"
-          className={({ isActive }) =>
-            `px-3 py-2 rounded text-sm font-medium ${isActive ? 'bg-accent text-white' : 'text-gray-600 hover:bg-gray-100'}`
-          }
-        >
-          План мероприятий
-        </NavLink>
-      </div>
+      <HrTabs active="events" />
 
       <div className="mb-4">
         <Link to="/hr" className="text-accent hover:underline text-sm">

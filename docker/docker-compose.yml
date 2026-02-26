@@ -43,6 +43,11 @@ services:
       SEED_ADMIN_LOGIN: ${SEED_ADMIN_LOGIN:-admin}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin123}
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@localhost}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://141.105.65.20:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:32b}
+      OLLAMA_TIMEOUT_MS: ${OLLAMA_TIMEOUT_MS:-45000}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_BOT_PASSWORD: ${TELEGRAM_BOT_PASSWORD:-}
     volumes:
       - ../backend/apk:/app/apk:ro
       - ../backend/uploads:/app/uploads
