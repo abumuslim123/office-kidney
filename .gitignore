@@ -35,3 +35,6 @@ backend/apk/*.idsig
 
 # Gradle cache (tv-app)
 tv-app/.gradle/
+
+# Uploaded files
+backend/uploads/

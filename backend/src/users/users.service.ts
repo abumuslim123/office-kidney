@@ -182,6 +182,12 @@ export class UsersService {
       { slug: 'processes_view', name: 'Процессы: просмотр' },
       { slug: 'processes_edit', name: 'Процессы: редактирование' },
       { slug: 'processes_approve', name: 'Процессы: утверждение' },
+      { slug: 'hr_resume_view', name: 'HR Резюме: просмотр' },
+      { slug: 'hr_resume_edit', name: 'HR Резюме: редактирование' },
+      { slug: 'hr_resume_delete', name: 'HR Резюме: удаление' },
+      { slug: 'hr_resume_analytics', name: 'HR Резюме: аналитика' },
+      { slug: 'hr_resume_public_apply_manage', name: 'HR Резюме: публичные отклики' },
+      { slug: 'hr_resume_telegram_manage', name: 'HR Резюме: Telegram канал' },
     ]);
   }
 }

@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
-import { useParams, Link, NavLink } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import HrTabs from '../components/HrTabs';
 
 type StatusOption = { label: string; color: string };
 
@@ -430,25 +431,7 @@ export default function HrListView() {
 
   return (
     <div>
-      <div className="flex gap-2 mb-4 border-b border-gray-200 pb-2">
-        <NavLink
-          to="/hr"
-          end
-          className={({ isActive }) =>
-            `px-3 py-2 rounded text-sm font-medium ${isActive ? 'bg-accent text-white' : 'text-gray-600 hover:bg-gray-100'}`
-          }
-        >
-          Списки
-        </NavLink>
-        <NavLink
-          to="/hr/events"
-          className={({ isActive }) =>
-            `px-3 py-2 rounded text-sm font-medium ${isActive ? 'bg-accent text-white' : 'text-gray-600 hover:bg-gray-100'}`
-          }
-        >
-          План мероприятий
-        </NavLink>
-      </div>
+      <HrTabs active="lists" />
       <div className="mb-4">
         {list.folderId ? (
           <Link to={`/hr/folder/${list.folderId}`} className="text-accent hover:underline text-sm">&larr; Назад в папку</Link>
