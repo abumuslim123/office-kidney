@@ -1,4 +1,4 @@
-import { IsObject, IsOptional } from 'class-validator';
+import { IsBoolean, IsObject, IsOptional, IsString } from 'class-validator';
 
 export class CreateVersionDto {
   @IsObject()
@@ -26,4 +26,12 @@ export class CreateVersionDto {
       sections: Array<{ title: string; items: Array<{ title: string }> }>;
     }>;
   };
+
+  @IsOptional()
+  @IsBoolean()
+  isIteration?: boolean;
+
+  @IsOptional()
+  @IsString()
+  changeReason?: string;
 }

@@ -14,7 +14,8 @@ export type ProcessActivityActionType =
   | 'view_process'
   | 'view_version'
   | 'acknowledge_latest'
-  | 'checklist_approved';
+  | 'checklist_approved'
+  | 'version_created';
 
 @Entity('process_activity_log')
 export class ProcessActivityLog {
