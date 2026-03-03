@@ -18,9 +18,12 @@ import {
   CALLS_POLZA_API_KEY,
   CALLS_POLZA_AUDIO_MODEL,
   CALLS_POLZA_AUDIO_PATH,
+  CALLS_SPEECHKIT_API_KEY,
+  CALLS_SPEECHKIT_FOLDER_ID,
+  CALLS_PROVIDER,
 } from './calls-settings.constants';
 import { AitunnelAudioService } from './aitunnel-audio.service';
-import { splitStereoAudioToMonoFiles } from './wav-channel-splitter';
+import { splitStereoAudioToMonoFiles, preprocessAudioForTranscription } from './wav-channel-splitter';
 
 type CallFilters = {
   from?: Date;
@@ -428,12 +431,18 @@ export class CallsService {
     apiBase?: string;
     audioPath?: string;
     model?: string;
+    provider: string;
+    speechkitConfigured: boolean;
+    speechkitFolderIdMask?: string;
   }> {
     const apiKey = await this.getSetting(CALLS_AUDIO_API_KEY);
     const apiBaseRaw = await this.getSetting(CALLS_AUDIO_API_BASE);
     const apiBase = apiBaseRaw && apiBaseRaw.includes('polza.ai') ? null : apiBaseRaw;
     const audioPath = await this.getSetting(CALLS_AUDIO_PATH);
     const model = await this.getSetting(CALLS_AUDIO_MODEL);
+    const provider = (await this.getSetting(CALLS_PROVIDER)) || 'aitunnel';
+    const speechkitKey = await this.getSetting(CALLS_SPEECHKIT_API_KEY);
+    const speechkitFolderId = await this.getSetting(CALLS_SPEECHKIT_FOLDER_ID);
 
     let apiKeyMask: string | undefined;
     if (apiKey) {
@@ -442,12 +451,22 @@ export class CallsService {
         : '***';
     }
 
+    let speechkitFolderIdMask: string | undefined;
+    if (speechkitFolderId) {
+      speechkitFolderIdMask = speechkitFolderId.length > 8
+        ? `${speechkitFolderId.slice(0, 4)}...${speechkitFolderId.slice(-4)}`
+        : speechkitFolderId;
+    }
+
     return {
       apiKeyConfigured: Boolean(apiKey),
       apiKeyMask,
       apiBase: apiBase || (this.config.get<string>('AITUNNEL_API_BASE') || '').trim() || 'https://api.aitunnel.ru/v1',
       audioPath: audioPath || (this.config.get<string>('AITUNNEL_AUDIO_PATH') || '').trim() || '/audio/transcriptions',
       model: model || (this.config.get<string>('AITUNNEL_AUDIO_MODEL') || '').trim() || 'whisper-1',
+      provider,
+      speechkitConfigured: Boolean(speechkitKey && speechkitFolderId),
+      speechkitFolderIdMask,
     };
   }
 
@@ -456,6 +475,9 @@ export class CallsService {
     apiBase?: string;
     audioPath?: string;
     model?: string;
+    provider?: string;
+    speechkitApiKey?: string;
+    speechkitFolderId?: string;
   }) {
     const updates: Array<{ key: string; value: string | null }> = [];
 
@@ -475,6 +497,18 @@ export class CallsService {
       const raw = data.model.trim();
       const normalized = raw.includes('/') ? raw.split('/').pop() || '' : raw;
       updates.push({ key: CALLS_AUDIO_MODEL, value: normalized || null });
+    }
+    if (data.provider !== undefined) {
+      const value = ['aitunnel', 'yandex'].includes(data.provider) ? data.provider : 'aitunnel';
+      updates.push({ key: CALLS_PROVIDER, value });
+    }
+    if (data.speechkitApiKey !== undefined) {
+      const value = data.speechkitApiKey.trim();
+      updates.push({ key: CALLS_SPEECHKIT_API_KEY, value: value || null });
+    }
+    if (data.speechkitFolderId !== undefined) {
+      const value = data.speechkitFolderId.trim();
+      updates.push({ key: CALLS_SPEECHKIT_FOLDER_ID, value: value || null });
     }
 
     await Promise.all(
@@ -585,6 +619,7 @@ export class CallsService {
     };
 
     let tempPaths: { leftPath: string; rightPath: string } | null = null;
+    let cleanPath: string | null = null;
 
     try {
       const isWavOrMp3 = /\.(wav|mp3)$/i.test(audioPath);
@@ -623,6 +658,15 @@ export class CallsService {
 
         operatorText = pickText(operatorResponse) || null;
         abonentText = pickText(abonentResponse) || null;
+
+        // LLM-коррекция медицинской терминологии (параллельно для обоих каналов)
+        const [corrOp, corrAb] = await Promise.all([
+          operatorText ? this.audioProvider.correctMedicalTranscript(operatorText) : Promise.resolve(null),
+          abonentText ? this.audioProvider.correctMedicalTranscript(abonentText) : Promise.resolve(null),
+        ]);
+        if (corrOp !== null) operatorText = corrOp;
+        if (corrAb !== null) abonentText = corrAb;
+
         text =
           (operatorText ? `Оператор:\n${operatorText}` : '') +
           (operatorText && abonentText ? '\n\n' : '') +
@@ -648,7 +692,10 @@ export class CallsService {
       } else {
         // Стерео-сплит не сработал (моно файл или нет ffmpeg) — используем diarize для определения спикеров
         this.logger.log('Stereo split unavailable, falling back to diarize transcription');
-        response = await this.audioProvider.transcribeWithDiarize(audioPath, path.basename(audioPath));
+        // Предобрабатываем аудио: шумоподавление + нормализация + 16 кГц
+        cleanPath = await preprocessAudioForTranscription(audioPath);
+        const diarizeInputPath = cleanPath ?? audioPath;
+        response = await this.audioProvider.transcribeWithDiarize(diarizeInputPath, path.basename(audioPath));
         const diarizeSegments = getDiarizeSegments(response);
         if (diarizeSegments.length) {
           // API вернул сегменты с метками спикеров
@@ -686,6 +733,15 @@ export class CallsService {
 
           operatorText = turnsFromDiarize.filter(t => t.speaker === 'operator').map(t => t.text).join(' ') || null;
           abonentText = turnsFromDiarize.filter(t => t.speaker === 'abonent').map(t => t.text).join(' ') || null;
+
+          // LLM-коррекция медицинской терминологии (параллельно)
+          const [corrOpD, corrAbD] = await Promise.all([
+            operatorText ? this.audioProvider.correctMedicalTranscript(operatorText) : Promise.resolve(null),
+            abonentText ? this.audioProvider.correctMedicalTranscript(abonentText) : Promise.resolve(null),
+          ]);
+          if (corrOpD !== null) operatorText = corrOpD;
+          if (corrAbD !== null) abonentText = corrAbD;
+
           text =
             (operatorText ? `Оператор:\n${operatorText}` : '') +
             (operatorText && abonentText ? '\n\n' : '') +
@@ -816,6 +872,9 @@ export class CallsService {
       if (tempPaths) {
         await fs.unlink(tempPaths.leftPath).catch(() => {});
         await fs.unlink(tempPaths.rightPath).catch(() => {});
+      }
+      if (cleanPath) {
+        await fs.unlink(cleanPath).catch(() => {});
       }
     }
   }
