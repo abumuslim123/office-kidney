@@ -9,6 +9,9 @@ type CallsSettings = {
   apiBase?: string;
   audioPath?: string;
   model?: string;
+  provider: string;
+  speechkitConfigured: boolean;
+  speechkitFolderIdMask?: string;
 };
 
 const DEFAULT_API_BASE = 'https://api.aitunnel.ru/v1';
@@ -21,11 +24,22 @@ export default function CallsSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  // AITunnel / Polza.ai
   const [apiKey, setApiKey] = useState('');
   const [apiBase, setApiBase] = useState('');
   const [audioPath, setAudioPath] = useState('');
   const [model, setModel] = useState('');
   const [clearKey, setClearKey] = useState(false);
+
+  // Провайдер
+  const [provider, setProvider] = useState<'aitunnel' | 'yandex'>('aitunnel');
+
+  // Yandex SpeechKit
+  const [speechkitApiKey, setSpeechkitApiKey] = useState('');
+  const [speechkitFolderId, setSpeechkitFolderId] = useState('');
+  const [clearSpeechkitKey, setClearSpeechkitKey] = useState(false);
+
   const userPermissions = user?.permissions?.map((p) => p.slug) || [];
   const canManageApiKey = userPermissions.includes('calls_api_key');
   const modelOptions = Array.from(new Set([...DEFAULT_MODELS, model].filter(Boolean)));
@@ -39,8 +53,12 @@ export default function CallsSettings() {
       setApiBase(res.data.apiBase || DEFAULT_API_BASE);
       setAudioPath(res.data.audioPath || DEFAULT_AUDIO_PATH);
       setModel(res.data.model || DEFAULT_MODELS[0]);
+      setProvider((res.data.provider as 'aitunnel' | 'yandex') || 'aitunnel');
       setApiKey('');
+      setSpeechkitApiKey('');
+      setSpeechkitFolderId('');
       setClearKey(false);
+      setClearSpeechkitKey(false);
     } catch {
       setError('Не удалось загрузить настройки');
     } finally {
@@ -57,27 +75,30 @@ export default function CallsSettings() {
     setSaving(true);
     setError('');
     try {
-      const payload: {
-        apiKey?: string;
-        apiBase?: string;
-        audioPath?: string;
-        model?: string;
-      } = {
-        apiBase,
-        audioPath,
-        model,
-      };
+      const payload: Record<string, string> = { apiBase, audioPath, model, provider };
 
-      if (canManageApiKey && clearKey) {
-        payload.apiKey = '';
-      } else if (canManageApiKey && apiKey.trim()) {
-        payload.apiKey = apiKey.trim();
+      if (canManageApiKey) {
+        if (clearKey) payload.apiKey = '';
+        else if (apiKey.trim()) payload.apiKey = apiKey.trim();
+      }
+
+      if (canManageApiKey) {
+        if (clearSpeechkitKey) {
+          payload.speechkitApiKey = '';
+          payload.speechkitFolderId = '';
+        } else {
+          if (speechkitApiKey.trim()) payload.speechkitApiKey = speechkitApiKey.trim();
+          if (speechkitFolderId.trim()) payload.speechkitFolderId = speechkitFolderId.trim();
+        }
       }
 
       const res = await api.put<CallsSettings>('/calls/settings', payload);
       setSettings(res.data);
       setApiKey('');
+      setSpeechkitApiKey('');
+      setSpeechkitFolderId('');
       setClearKey(false);
+      setClearSpeechkitKey(false);
     } catch (err: unknown) {
       const data = err && typeof err === 'object' && 'response' in err
         ? (err as { response?: { data?: { message?: string } } }).response?.data
@@ -106,82 +127,180 @@ export default function CallsSettings() {
       {loading ? (
         <p className="text-gray-500">Загрузка...</p>
       ) : (
-        <form onSubmit={save} className="bg-white border border-gray-200 rounded-lg p-4 max-w-2xl">
-          <div className="text-sm text-gray-600 mb-4">
-            {canManageApiKey
-              ? settings?.apiKeyConfigured
-                ? `Ключ AITunnel настроен (${settings.apiKeyMask || '***'})`
-                : 'Ключ AITunnel не настроен'
-              : 'Доступ к API ключу ограничен'}
-          </div>
+        <form onSubmit={save} className="max-w-2xl space-y-4">
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {canManageApiKey && (
-              <label className="text-xs text-gray-600">
-                API ключ (AITunnel)
+          {/* Провайдер */}
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <p className="text-sm font-medium text-gray-700 mb-3">Провайдер транскрипции</p>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
                 <input
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  className="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"
-                  placeholder="Вставьте новый ключ"
+                  type="radio"
+                  name="provider"
+                  value="aitunnel"
+                  checked={provider === 'aitunnel'}
+                  onChange={() => setProvider('aitunnel')}
+                  className="accent-indigo-600"
                 />
+                <span className="text-sm text-gray-700">
+                  Whisper / GPT-4o
+                  <span className="ml-1 text-xs text-gray-400">(Polza.ai · AITunnel)</span>
+                </span>
               </label>
-            )}
-            {!canManageApiKey && (
-              <div className="text-xs text-gray-500 border border-gray-200 rounded px-3 py-2 bg-gray-50">
-                Для управления API ключом нужен доступ `calls_api_key`.
-              </div>
-            )}
-            <label className="text-xs text-gray-600">
-              API base URL (AITunnel)
-              <input
-                type="text"
-                value={apiBase}
-                readOnly
-                className="mt-1 w-full border border-gray-200 bg-gray-50 rounded px-2 py-1 text-sm"
-                placeholder="https://api.aitunnel.ru/v1"
-              />
-            </label>
-            <label className="text-xs text-gray-600">
-              Audio path
-              <input
-                type="text"
-                value={audioPath}
-                readOnly
-                className="mt-1 w-full border border-gray-200 bg-gray-50 rounded px-2 py-1 text-sm"
-                placeholder="/audio/transcriptions"
-              />
-            </label>
-            <label className="text-xs text-gray-600">
-              Модель транскрибации
-              <select
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                className="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"
-              >
-                {modelOptions.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="provider"
+                  value="yandex"
+                  checked={provider === 'yandex'}
+                  onChange={() => setProvider('yandex')}
+                  className="accent-indigo-600"
+                />
+                <span className="text-sm text-gray-700">
+                  Yandex SpeechKit
+                  <span className="ml-1 text-xs text-gray-400">(русский язык)</span>
+                </span>
+              </label>
+            </div>
           </div>
 
-          {canManageApiKey && (
-            <div className="mt-3 flex items-center gap-2 text-xs text-gray-600">
-              <input
-                id="clear-api-key"
-                type="checkbox"
-                checked={clearKey}
-                onChange={(e) => setClearKey(e.target.checked)}
-              />
-              <label htmlFor="clear-api-key">Очистить ключ при сохранении</label>
+          {/* AITunnel / Polza.ai */}
+          {provider === 'aitunnel' && (
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <p className="text-sm font-medium text-gray-700 mb-1">Polza.ai / AITunnel</p>
+              <p className="text-xs text-gray-500 mb-3">
+                {canManageApiKey
+                  ? settings?.apiKeyConfigured
+                    ? `Ключ настроен (${settings.apiKeyMask || '***'})`
+                    : 'Ключ не настроен'
+                  : 'Доступ к API ключу ограничен'}
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {canManageApiKey ? (
+                  <label className="text-xs text-gray-600">
+                    API ключ (AITunnel)
+                    <input
+                      type="password"
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      className="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                      placeholder="Вставьте новый ключ"
+                    />
+                  </label>
+                ) : (
+                  <div className="text-xs text-gray-500 border border-gray-200 rounded px-3 py-2 bg-gray-50">
+                    Для управления API ключом нужен доступ `calls_api_key`.
+                  </div>
+                )}
+                <label className="text-xs text-gray-600">
+                  Модель транскрибации
+                  <select
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    className="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                  >
+                    {modelOptions.map((opt) => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs text-gray-600">
+                  API base URL
+                  <input
+                    type="text"
+                    value={apiBase}
+                    readOnly
+                    className="mt-1 w-full border border-gray-200 bg-gray-50 rounded px-2 py-1 text-sm"
+                  />
+                </label>
+                <label className="text-xs text-gray-600">
+                  Audio path
+                  <input
+                    type="text"
+                    value={audioPath}
+                    readOnly
+                    className="mt-1 w-full border border-gray-200 bg-gray-50 rounded px-2 py-1 text-sm"
+                  />
+                </label>
+              </div>
+
+              {canManageApiKey && (
+                <div className="mt-3 flex items-center gap-2 text-xs text-gray-600">
+                  <input
+                    id="clear-api-key"
+                    type="checkbox"
+                    checked={clearKey}
+                    onChange={(e) => setClearKey(e.target.checked)}
+                  />
+                  <label htmlFor="clear-api-key">Очистить ключ при сохранении</label>
+                </div>
+              )}
             </div>
           )}
 
-          <div className="mt-4 flex gap-2">
+          {/* Yandex SpeechKit */}
+          {provider === 'yandex' && (
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <p className="text-sm font-medium text-gray-700 mb-1">Yandex SpeechKit</p>
+              <p className="text-xs text-gray-500 mb-3">
+                {settings?.speechkitConfigured
+                  ? `Настроен (Folder: ${settings.speechkitFolderIdMask || '***'})`
+                  : 'Не настроен — укажите API ключ и Folder ID'}
+              </p>
+
+              <div className="bg-blue-50 border border-blue-200 rounded p-3 mb-3 text-xs text-blue-700">
+                <strong>Как получить:</strong> Yandex Cloud Console → Сервисные аккаунты → создать аккаунт с ролью <code>ai.speechkit-stt.user</code> → создать API ключ. Folder ID — в настройках каталога.
+              </div>
+
+              {canManageApiKey ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <label className="text-xs text-gray-600">
+                    API ключ (статический)
+                    <input
+                      type="password"
+                      value={speechkitApiKey}
+                      onChange={(e) => setSpeechkitApiKey(e.target.value)}
+                      className="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                      placeholder="Вставьте API ключ"
+                    />
+                  </label>
+                  <label className="text-xs text-gray-600">
+                    Folder ID
+                    <input
+                      type="text"
+                      value={speechkitFolderId}
+                      onChange={(e) => setSpeechkitFolderId(e.target.value)}
+                      className="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                      placeholder="b1g..."
+                    />
+                  </label>
+                </div>
+              ) : (
+                <div className="text-xs text-gray-500 border border-gray-200 rounded px-3 py-2 bg-gray-50">
+                  Для управления ключами нужен доступ `calls_api_key`.
+                </div>
+              )}
+
+              {canManageApiKey && (
+                <div className="mt-3 flex items-center gap-2 text-xs text-gray-600">
+                  <input
+                    id="clear-speechkit-key"
+                    type="checkbox"
+                    checked={clearSpeechkitKey}
+                    onChange={(e) => setClearSpeechkitKey(e.target.checked)}
+                  />
+                  <label htmlFor="clear-speechkit-key">Очистить ключи SpeechKit при сохранении</label>
+                </div>
+              )}
+
+              <p className="mt-3 text-xs text-gray-400">
+                Аудио → ffmpeg (нарезка по 24 сек, 16 кГц моно) → SpeechKit REST v1 → сборка текста → LLM-коррекция терминов
+              </p>
+            </div>
+          )}
+
+          <div className="flex gap-2">
             <button
               type="submit"
               disabled={saving}

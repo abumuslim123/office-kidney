@@ -25,6 +25,7 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { CallsService } from './calls.service';
 import { User } from '../users/entities/user.entity';
+import { UpdateCallsSettingsDto } from './dto/update-settings.dto';
 
 @Controller('calls')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -85,10 +86,13 @@ export class CallsController {
   @Permissions('calls_settings')
   updateSettings(
     @Req() req: { user: User },
-    @Body()
-    body: { apiKey?: string; apiBase?: string; audioPath?: string; model?: string },
+    @Body() body: UpdateCallsSettingsDto,
   ) {
-    if (body.apiKey !== undefined) {
+    const needsKeyPerm =
+      body.apiKey !== undefined ||
+      body.speechkitApiKey !== undefined ||
+      body.speechkitFolderId !== undefined;
+    if (needsKeyPerm) {
       const userPermissions = req.user?.permissions?.map((p) => p.slug) || [];
       if (!userPermissions.includes('calls_api_key')) {
         throw new ForbiddenException('Нет прав для изменения API ключа');
