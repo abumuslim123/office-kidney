@@ -17,8 +17,8 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import * as multer from 'multer';
-import { Response } from 'express';
-import { createReadStream } from 'fs';
+import { Request, Response } from 'express';
+import { createReadStream, statSync } from 'fs';
 import * as path from 'path';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
@@ -141,6 +141,43 @@ export class CallsController {
     });
   }
 
+  @Get(':id/audio')
+  async streamAudio(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    const filePath = await this.calls.getAudioPath(id);
+    if (!filePath) return res.status(404).send('Audio not found');
+    const ext = path.extname(filePath).toLowerCase();
+    const contentType = ext === '.mp3' ? 'audio/mpeg' : ext === '.wav' ? 'audio/wav' : 'application/octet-stream';
+
+    const stat = statSync(filePath);
+    const fileSize = stat.size;
+
+    const range = req.headers.range;
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      res.writeHead(206, {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': end - start + 1,
+        'Content-Type': contentType,
+      });
+      createReadStream(filePath, { start, end }).pipe(res);
+    } else {
+      res.writeHead(200, {
+        'Content-Length': fileSize,
+        'Content-Type': contentType,
+        'Accept-Ranges': 'bytes',
+      });
+      createReadStream(filePath).pipe(res);
+    }
+  }
+
+  @Get(':id')
+  getCall(@Param('id') id: string) {
+    return this.calls.getCall(id);
+  }
+
   @Post(':id/transcribe')
   transcribe(@Param('id') id: string) {
     return this.calls.transcribeCall(id);
@@ -150,18 +187,5 @@ export class CallsController {
   async deleteAudio(@Param('id') id: string) {
     await this.calls.deleteAudio(id);
     return { success: true };
-  }
-
-  @Get(':id/audio')
-  async streamAudio(@Param('id') id: string, @Res() res: Response) {
-    const filePath = await this.calls.getAudioPath(id);
-    if (!filePath) return res.status(404).send('Audio not found');
-    const ext = path.extname(filePath).toLowerCase();
-    const contentType = ext === '.mp3' ? 'audio/mpeg' : ext === '.wav' ? 'audio/wav' : 'application/octet-stream';
-    const safeExt = ext && /^\.\w+$/.test(ext) ? ext : '';
-    res.setHeader('Content-Disposition', `attachment; filename="call-${id}${safeExt}"`);
-    res.setHeader('Content-Type', contentType);
-    const stream = createReadStream(filePath);
-    stream.pipe(res);
   }
 }

@@ -18,7 +18,7 @@ export function convertMp3ToWav(mp3Path: string): Promise<string | null> {
   return new Promise((resolve) => {
     const ff = spawn(
       'ffmpeg',
-      ['-y', '-i', mp3Path, '-acodec', 'pcm_s16le', '-ar', '44100', '-ac', '2', wavPath],
+      ['-y', '-i', mp3Path, '-acodec', 'pcm_s16le', '-ar', '44100', wavPath],
       { stdio: ['ignore', 'pipe', 'pipe'] },
     );
     let stderr = '';
