@@ -26,6 +26,7 @@ import ResumeApplyPublic from './pages/ResumeApplyPublic';
 import Screens from './pages/Screens';
 import ScreensSettings from './pages/ScreensSettings';
 import Calls from './pages/Calls';
+import CallDetail from './pages/CallDetail';
 import CallTopics from './pages/CallTopics';
 import CallsSettings from './pages/CallsSettings';
 import Processes from './pages/Processes';
@@ -74,6 +75,7 @@ function App() {
         <Route path="bitrix24/employees" element={<ProtectedRoute permissions={['bitrix24']}><Bitrix24Employees /></ProtectedRoute>} />
         <Route path="services" element={<ProtectedRoute permissions={['services']}><Services /></ProtectedRoute>} />
         <Route path="calls" element={<ProtectedRoute permissions={['calls']}><Calls /></ProtectedRoute>} />
+        <Route path="calls/:id" element={<ProtectedRoute permissions={['calls']}><CallDetail /></ProtectedRoute>} />
         <Route path="processes" element={<ProtectedRoute permissions={['processes_view']}><Processes /></ProtectedRoute>} />
         <Route path="settings" element={<ProtectedRoute permissions={['processes_edit']}><Settings /></ProtectedRoute>} />
         <Route path="calls/topics" element={<ProtectedRoute permissions={['calls_manage_topics']}><CallTopics /></ProtectedRoute>} />

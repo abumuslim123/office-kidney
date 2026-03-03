@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -67,6 +67,101 @@ type CallStats = {
   }[];
 };
 
+/* ── Icon components ── */
+
+function IconTranscribe({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+  );
+}
+
+function IconSpinner({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={`${className} animate-spin`} fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    </svg>
+  );
+}
+
+function IconDetail({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+    </svg>
+  );
+}
+
+function IconPlay({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24">
+      <path d="M8 5v14l11-7z" />
+    </svg>
+  );
+}
+
+function IconPause({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24">
+      <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+    </svg>
+  );
+}
+
+function IconDownload({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+    </svg>
+  );
+}
+
+function IconTrash({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+  );
+}
+
+function IconFilter({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+    </svg>
+  );
+}
+
+function IconUpload({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+    </svg>
+  );
+}
+
+function IconSettings({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+    </svg>
+  );
+}
+
+function IconTag({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z" />
+    </svg>
+  );
+}
+
+/* ── Helpers ── */
+
 const toLocalInput = (date: Date) => {
   const pad = (n: number) => String(n).padStart(2, '0');
   const y = date.getFullYear();
@@ -100,40 +195,27 @@ const formatSeconds = (value?: number) => {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 };
 
-const escapeHtml = (value: string) =>
-  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-const highlightText = (text: string, keywords: string[]) => {
-  if (!text) return '';
-  const uniq = Array.from(new Set(keywords.map((k) => k.trim()).filter(Boolean)));
-  if (!uniq.length) return escapeHtml(text);
-  const pattern = uniq.map(escapeRegExp).join('|');
-  const regex = new RegExp(`(${pattern})`, 'gi');
-  return escapeHtml(text).replace(regex, '<mark class="bg-yellow-200 text-gray-900 px-1 rounded">$1</mark>');
+const statusLabel: Record<string, string> = {
+  uploaded: 'Загружен',
+  transcribing: 'Транскрибируется',
+  transcribed: 'Готово',
+  failed: 'Ошибка',
+  no_audio: 'Нет аудио',
 };
 
-const splitTranscript = (text: string) => {
-  const rawLines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const lines = rawLines.length
-    ? rawLines
-    : text
-      .split(/(?<=[.!?])\s+/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-  if (!lines.length) return [];
-  return lines.map((line, idx) => ({
-    speaker: idx % 2 === 0 ? 'Оператор' : 'Собеседник',
-    text: line,
-  }));
+const statusColor: Record<string, string> = {
+  uploaded: 'bg-blue-50 text-blue-700',
+  transcribing: 'bg-yellow-50 text-yellow-700',
+  transcribed: 'bg-green-50 text-green-700',
+  failed: 'bg-red-50 text-red-700',
+  no_audio: 'bg-gray-100 text-gray-500',
 };
+
+/* ── Component ── */
 
 export default function Calls() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [calls, setCalls] = useState<CallRow[]>([]);
   const [topics, setTopics] = useState<CallTopic[]>([]);
   const [stats, setStats] = useState<CallStats | null>(null);
@@ -141,9 +223,11 @@ export default function Calls() {
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
   const [transcribingId, setTranscribingId] = useState<string | null>(null);
-  const [expandedCallId, setExpandedCallId] = useState<string | null>(null);
   const [playingCallId, setPlayingCallId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement>(new Audio());
+
+  const [showFilters, setShowFilters] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
 
   const [filterFrom, setFilterFrom] = useState('');
   const [filterTo, setFilterTo] = useState('');
@@ -158,6 +242,7 @@ export default function Calls() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
 
   const activeTopics = useMemo(() => topics.filter((t) => t.isActive), [topics]);
+  const hasActiveFilters = filterFrom || filterTo || filterEmployees.length > 0 || filterTopics.length > 0;
 
   const apiBase = api.defaults.baseURL || '/api';
   const userPermissions = user?.permissions?.map((p) => p.slug) || [];
@@ -214,6 +299,7 @@ export default function Calls() {
     if (to) params.to = to;
     if (topicsParam) params.topics = topicsParam;
     if (employeesParam) params.employees = employeesParam;
+    if (from || to || topicsParam || employeesParam) setShowFilters(true);
     loadData(Object.keys(params).length ? params : undefined);
   }, []);
 
@@ -328,425 +414,359 @@ export default function Calls() {
     }
   };
 
-  const toggleTranscript = (callId: string) => {
-    setExpandedCallId((prev) => (prev === callId ? null : callId));
-  };
-
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-5">
         <h2 className="text-xl font-semibold text-gray-900">Звонки</h2>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowUpload((v) => !v)}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+              showUpload ? 'bg-accent text-white border-accent' : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <IconUpload />
+            Загрузить
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowFilters((v) => !v)}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+              showFilters
+                ? 'bg-accent text-white border-accent'
+                : hasActiveFilters
+                  ? 'border-accent text-accent hover:bg-accent/5'
+                  : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <IconFilter />
+            Фильтры
+            {hasActiveFilters && !showFilters && (
+              <span className="ml-1 w-2 h-2 rounded-full bg-accent inline-block" />
+            )}
+          </button>
           {canViewSettings && (
             <Link
               to="/calls/settings"
-              className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
             >
+              <IconSettings />
               Настройки
             </Link>
           )}
           <Link
             to="/calls/topics"
-            className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:opacity-90"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors"
           >
+            <IconTag />
             Тематики
           </Link>
         </div>
       </div>
 
       {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+        <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
           {error}
         </div>
       )}
 
-      <div className="mb-6 p-4 bg-white border border-gray-200 rounded-lg">
-        <div className="text-sm font-medium text-gray-900 mb-3">Фильтры</div>
-        <div className="flex flex-wrap gap-4 items-end">
-          <label className="text-xs text-gray-600">
-            Период с
-            <input
-              type="datetime-local"
-              value={filterFrom}
-              onChange={(e) => setFilterFrom(e.target.value)}
-              className="mt-1 w-48 border border-gray-300 rounded px-2 py-1 text-sm"
-            />
-          </label>
-          <label className="text-xs text-gray-600">
-            Период по
-            <input
-              type="datetime-local"
-              value={filterTo}
-              onChange={(e) => setFilterTo(e.target.value)}
-              className="mt-1 w-48 border border-gray-300 rounded px-2 py-1 text-sm"
-            />
-          </label>
-          <label className="text-xs text-gray-600">
-            Сотрудники
-            <select
-              multiple
-              value={filterEmployees}
-              onChange={(e) =>
-                setFilterEmployees(Array.from(e.target.selectedOptions).map((o) => o.value))
-              }
-              className="mt-1 w-56 border border-gray-300 rounded px-2 py-1 text-sm h-24"
-            >
-              {(stats?.employees || []).map((row) => (
-                <option key={row.employeeName} value={row.employeeName}>
-                  {row.employeeName}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-xs text-gray-600">
-            Тематики
-            <select
-              multiple
-              value={filterTopics}
-              onChange={(e) =>
-                setFilterTopics(Array.from(e.target.selectedOptions).map((o) => o.value))
-              }
-              className="mt-1 w-56 border border-gray-300 rounded px-2 py-1 text-sm h-24"
-            >
-              {activeTopics.map((topic) => (
-                <option key={topic.id} value={topic.id}>
-                  {topic.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="flex gap-2">
+      {/* Filters panel */}
+      {showFilters && (
+        <div className="mb-5 p-5 bg-white border border-gray-200 rounded-xl shadow-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Период с</label>
+              <input
+                type="datetime-local"
+                value={filterFrom}
+                onChange={(e) => setFilterFrom(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-accent/30 focus:border-accent outline-none transition"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Период по</label>
+              <input
+                type="datetime-local"
+                value={filterTo}
+                onChange={(e) => setFilterTo(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-accent/30 focus:border-accent outline-none transition"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Сотрудники</label>
+              <select
+                multiple
+                value={filterEmployees}
+                onChange={(e) =>
+                  setFilterEmployees(Array.from(e.target.selectedOptions).map((o) => o.value))
+                }
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm h-[72px] focus:ring-2 focus:ring-accent/30 focus:border-accent outline-none transition"
+              >
+                {(stats?.employees || []).map((row) => (
+                  <option key={row.employeeName} value={row.employeeName}>
+                    {row.employeeName}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Тематики</label>
+              <select
+                multiple
+                value={filterTopics}
+                onChange={(e) =>
+                  setFilterTopics(Array.from(e.target.selectedOptions).map((o) => o.value))
+                }
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm h-[72px] focus:ring-2 focus:ring-accent/30 focus:border-accent outline-none transition"
+              >
+                {activeTopics.map((topic) => (
+                  <option key={topic.id} value={topic.id}>
+                    {topic.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="flex gap-2 mt-4">
             <button
               type="button"
               onClick={applyFilters}
-              className="px-3 py-1.5 bg-accent text-white rounded text-sm font-medium hover:opacity-90"
+              className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
             >
               Применить
             </button>
             <button
               type="button"
               onClick={resetFilters}
-              className="px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50"
+              className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors"
             >
               Сбросить
             </button>
           </div>
         </div>
-      </div>
+      )}
 
+      {/* Upload panel */}
+      {showUpload && (
+        <div className="mb-5 p-5 bg-white border border-gray-200 rounded-xl shadow-sm">
+          <div className="text-sm font-medium text-gray-700 mb-3">Ручная загрузка аудио</div>
+          <form onSubmit={handleUpload} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Сотрудник</label>
+              <input
+                type="text"
+                value={uploadEmployeeName}
+                onChange={(e) => setUploadEmployeeName(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-accent/30 focus:border-accent outline-none transition"
+                placeholder="Иван Иванов"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Клиент</label>
+              <input
+                type="text"
+                value={uploadClientName}
+                onChange={(e) => setUploadClientName(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-accent/30 focus:border-accent outline-none transition"
+                placeholder="ООО Ромашка"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Дата и время</label>
+              <input
+                type="datetime-local"
+                value={uploadCallAt}
+                onChange={(e) => setUploadCallAt(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-accent/30 focus:border-accent outline-none transition"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Аудиофайл</label>
+              <input
+                type="file"
+                accept="audio/wav,audio/mpeg,audio/mp3"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  setUploadFile(file);
+                  if (!file) return;
+                  const url = URL.createObjectURL(file);
+                  const audio = new Audio();
+                  audio.src = url;
+                  audio.addEventListener('loadedmetadata', () => {
+                    if (Number.isFinite(audio.duration) && audio.duration > 0) {
+                      setUploadDurationSeconds(String(Math.round(audio.duration)));
+                    }
+                    URL.revokeObjectURL(url);
+                  });
+                  audio.addEventListener('error', () => {
+                    URL.revokeObjectURL(url);
+                  });
+                }}
+                className="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200 file:cursor-pointer file:transition-colors"
+              />
+            </div>
+            <div>
+              <button
+                type="submit"
+                disabled={uploading}
+                className="w-full px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
+              >
+                {uploading ? 'Загрузка...' : 'Загрузить'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Stats */}
       {stats && (
-        <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="p-4 bg-white border border-gray-200 rounded-lg">
-            <div className="text-xs text-gray-500">Всего звонков</div>
-            <div className="text-2xl font-semibold text-gray-900">{stats.totalCalls}</div>
+        <div className="mb-5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="p-3 bg-white border border-gray-200 rounded-xl">
+            <div className="text-xs text-gray-500">Всего</div>
+            <div className="text-xl font-semibold text-gray-900 mt-0.5">{stats.totalCalls}</div>
           </div>
-          <div className="p-4 bg-white border border-gray-200 rounded-lg">
-            <div className="text-xs text-gray-500">Сотрудники / Клиенты</div>
-            <div className="text-2xl font-semibold text-gray-900">
-              {stats.totalEmployees} / {stats.totalClients}
-            </div>
+          <div className="p-3 bg-white border border-gray-200 rounded-xl">
+            <div className="text-xs text-gray-500">Сотрудники</div>
+            <div className="text-xl font-semibold text-gray-900 mt-0.5">{stats.totalEmployees}</div>
           </div>
-          <div className="p-4 bg-white border border-gray-200 rounded-lg">
-            <div className="text-xs text-gray-500">Суммарная длительность</div>
-            <div className="text-2xl font-semibold text-gray-900">
-              {formatSeconds(stats.totalDurationSeconds)}
-            </div>
+          <div className="p-3 bg-white border border-gray-200 rounded-xl">
+            <div className="text-xs text-gray-500">Клиенты</div>
+            <div className="text-xl font-semibold text-gray-900 mt-0.5">{stats.totalClients}</div>
           </div>
-          <div className="p-4 bg-white border border-gray-200 rounded-lg">
-            <div className="text-xs text-gray-500">Средняя запись</div>
-            <div className="text-lg font-semibold text-gray-900">
-              {formatSeconds(stats.avgDurationSeconds)}
-            </div>
+          <div className="p-3 bg-white border border-gray-200 rounded-xl">
+            <div className="text-xs text-gray-500">Общая длительность</div>
+            <div className="text-xl font-semibold text-gray-900 mt-0.5">{formatSeconds(stats.totalDurationSeconds)}</div>
           </div>
-          <div className="p-4 bg-white border border-gray-200 rounded-lg">
-            <div className="text-xs text-gray-500">Средняя речь</div>
-            <div className="text-lg font-semibold text-gray-900">
-              {formatSeconds(stats.avgSpeechDurationSeconds)}
-            </div>
+          <div className="p-3 bg-white border border-gray-200 rounded-xl">
+            <div className="text-xs text-gray-500">Ср. речь</div>
+            <div className="text-xl font-semibold text-gray-900 mt-0.5">{formatSeconds(stats.avgSpeechDurationSeconds)}</div>
           </div>
-          <div className="p-4 bg-white border border-gray-200 rounded-lg">
-            <div className="text-xs text-gray-500">Среднее молчание</div>
-            <div className="text-lg font-semibold text-gray-900">
-              {formatSeconds(stats.avgSilenceDurationSeconds)}
-            </div>
+          <div className="p-3 bg-white border border-gray-200 rounded-xl">
+            <div className="text-xs text-gray-500">Ср. молчание</div>
+            <div className="text-xl font-semibold text-gray-900 mt-0.5">{formatSeconds(stats.avgSilenceDurationSeconds)}</div>
           </div>
         </div>
       )}
 
-      <div className="mb-6 bg-white border border-gray-200 rounded-lg p-4">
-        <div className="text-sm font-medium text-gray-900 mb-3">Ручная загрузка для тестирования</div>
-        <form onSubmit={handleUpload} className="flex flex-wrap gap-4 items-end">
-          <label className="text-xs text-gray-600">
-            Сотрудник
-            <input
-              type="text"
-              value={uploadEmployeeName}
-              onChange={(e) => setUploadEmployeeName(e.target.value)}
-              className="mt-1 w-48 border border-gray-300 rounded px-2 py-1 text-sm"
-              placeholder="Иван Иванов"
-            />
-          </label>
-          <label className="text-xs text-gray-600">
-            Клиент
-            <input
-              type="text"
-              value={uploadClientName}
-              onChange={(e) => setUploadClientName(e.target.value)}
-              className="mt-1 w-48 border border-gray-300 rounded px-2 py-1 text-sm"
-              placeholder="ООО Ромашка"
-            />
-          </label>
-          <label className="text-xs text-gray-600">
-            Дата и время
-            <input
-              type="datetime-local"
-              value={uploadCallAt}
-              onChange={(e) => setUploadCallAt(e.target.value)}
-              className="mt-1 w-48 border border-gray-300 rounded px-2 py-1 text-sm"
-            />
-          </label>
-          <label className="text-xs text-gray-600">
-            Длительность (сек)
-            <input
-              type="number"
-              min={0}
-              value={uploadDurationSeconds}
-              onChange={(e) => setUploadDurationSeconds(e.target.value)}
-              className="mt-1 w-32 border border-gray-300 rounded px-2 py-1 text-sm"
-            />
-          </label>
-          <label className="text-xs text-gray-600">
-            Аудиофайл
-            <input
-              type="file"
-              accept="audio/wav,audio/mpeg,audio/mp3"
-              onChange={(e) => {
-                const file = e.target.files?.[0] || null;
-                setUploadFile(file);
-                if (!file) return;
-                const url = URL.createObjectURL(file);
-                const audio = new Audio();
-                audio.src = url;
-                audio.addEventListener('loadedmetadata', () => {
-                  if (Number.isFinite(audio.duration) && audio.duration > 0) {
-                    setUploadDurationSeconds(String(Math.round(audio.duration)));
-                  }
-                  URL.revokeObjectURL(url);
-                });
-                audio.addEventListener('error', () => {
-                  URL.revokeObjectURL(url);
-                });
-              }}
-              className="mt-1 block w-64 text-sm"
-            />
-          </label>
-          <button
-            type="submit"
-            disabled={uploading}
-            className="px-4 py-1.5 bg-accent text-white rounded text-sm font-medium hover:opacity-90 disabled:opacity-50"
-          >
-            {uploading ? 'Загрузка...' : 'Загрузить'}
-          </button>
-        </form>
-      </div>
-
+      {/* Table */}
       {loading ? (
-        <p className="text-gray-500">Загрузка...</p>
+        <div className="flex items-center justify-center py-16">
+          <IconSpinner className="w-6 h-6 text-gray-400" />
+        </div>
       ) : calls.length === 0 ? (
-        <p className="text-gray-500">Звонков пока нет.</p>
+        <div className="text-center py-16 text-gray-400 text-sm">Звонков пока нет</div>
       ) : (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
           <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Дата</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Сотрудник</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Клиент</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Длительность</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Тематики</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Статус</th>
-                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Действия</th>
+            <thead>
+              <tr className="bg-gray-50/80">
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Дата</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Сотрудник</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Клиент</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Длительность</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Тематики</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Статус</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Действия</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200">
+            <tbody className="divide-y divide-gray-100">
               {calls.map((call) => {
-                const keywords = call.matches.map((m) => m.keyword);
                 const audioUrl = `${apiBase}/calls/${call.id}/audio`;
-                const isExpanded = expandedCallId === call.id;
                 const hasAudio = Boolean(call.audioPath);
-                const groupedTopics = call.matches.reduce((acc, m) => {
-                  const list = acc.get(m.topicName) || [];
-                  list.push(m);
-                  acc.set(m.topicName, list);
-                  return acc;
-                }, new Map<string, CallMatch[]>());
+                const isTranscribing = transcribingId === call.id;
+                const isPlaying = playingCallId === call.id;
+
                 return (
                   <Fragment key={call.id}>
-                    <tr className="align-top">
-                      <td className="px-4 py-2 text-sm text-gray-700 whitespace-nowrap">{formatDate(call.callAt)}</td>
-                      <td className="px-4 py-2 text-sm text-gray-900">{call.employeeName}</td>
-                      <td className="px-4 py-2 text-sm text-gray-700">{call.clientName || '—'}</td>
-                      <td className="px-4 py-2 text-sm text-gray-700">
-                        {formatSeconds(call.durationSeconds)}
-                        <div className="text-xs text-gray-500">
-                          Речь {formatSeconds(call.speechDurationSeconds)} / молчание {formatSeconds(call.silenceDurationSeconds)}
+                    <tr className="hover:bg-gray-50/50 transition-colors">
+                      <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">
+                        {formatDate(call.callAt)}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                        {call.employeeName}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {call.clientName || <span className="text-gray-300">&mdash;</span>}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-700">
+                        <div className="font-medium">{formatSeconds(call.durationSeconds)}</div>
+                        <div className="text-xs text-gray-400 mt-0.5">
+                          речь {formatSeconds(call.speechDurationSeconds)} / тишина {formatSeconds(call.silenceDurationSeconds)}
                         </div>
                       </td>
-                      <td className="px-4 py-2 text-sm text-gray-700">
+                      <td className="px-4 py-3">
                         {call.matches.length ? (
                           <div className="flex flex-wrap gap-1">
-                            {call.matches.map((m, idx) => (
-                              <span key={`${m.topicId}-${m.keyword}-${idx}`} className="px-2 py-0.5 text-xs bg-gray-100 rounded">
-                                {m.topicName} ({m.occurrences})
+                            {[...new Map(call.matches.map((m) => [m.topicName, m])).values()].map((m) => (
+                              <span
+                                key={m.topicId}
+                                className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-indigo-50 text-indigo-700 rounded-full"
+                              >
+                                {m.topicName}
                               </span>
                             ))}
                           </div>
                         ) : (
-                          '—'
+                          <span className="text-gray-300">&mdash;</span>
                         )}
                       </td>
-                      <td className="px-4 py-2 text-sm text-gray-700">
-                        {call.status === 'uploaded' && 'Загружен'}
-                        {call.status === 'transcribing' && 'Транскрибируется'}
-                        {call.status === 'transcribed' && 'Готово'}
-                        {call.status === 'failed' && 'Ошибка'}
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor[call.status] || 'bg-gray-100 text-gray-600'}`}>
+                          {statusLabel[call.status] || call.status}
+                        </span>
                       </td>
-                      <td className="px-4 py-2 text-sm text-right space-x-2">
-                        <button
-                          type="button"
-                          onClick={() => handleTranscribe(call.id)}
-                          disabled={transcribingId === call.id}
-                          className="text-accent hover:underline disabled:opacity-50"
-                        >
-                          {transcribingId === call.id ? 'Транскрибируем...' : 'Транскрибировать'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => toggleTranscript(call.id)}
-                          className="text-accent hover:underline"
-                        >
-                          {isExpanded ? 'Скрыть текст' : 'Текст'}
-                        </button>
-                      {hasAudio && (
-                        <>
+                      <td className="px-4 py-3 text-right">
+                        <div className="inline-flex items-center gap-1">
                           <button
                             type="button"
-                            onClick={() => handlePlayAudio(call.id, audioUrl)}
-                            className="text-accent hover:underline"
+                            onClick={() => handleTranscribe(call.id)}
+                            disabled={isTranscribing}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-accent hover:bg-accent/10 disabled:opacity-40 transition-colors"
+                            title={isTranscribing ? 'Транскрибируем...' : 'Транскрибировать'}
                           >
-                            {playingCallId === call.id ? 'Пауза' : 'Плей'}
+                            {isTranscribing ? <IconSpinner /> : <IconTranscribe />}
                           </button>
-                          <a href={audioUrl} download className="text-accent hover:underline">
-                            Аудио
-                          </a>
                           <button
                             type="button"
-                            onClick={() => handleDeleteAudio(call.id)}
-                            className="text-red-600 hover:underline"
+                            onClick={() => navigate(`/calls/${call.id}`)}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-accent hover:bg-accent/10 transition-colors"
+                            title="Подробнее"
                           >
-                            Удалить аудио
+                            <IconDetail />
                           </button>
-                        </>
-                      )}
+                          {hasAudio && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handlePlayAudio(call.id, audioUrl)}
+                                className="p-1.5 rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors"
+                                title={isPlaying ? 'Пауза' : 'Воспроизвести'}
+                              >
+                                {isPlaying ? <IconPause /> : <IconPlay />}
+                              </button>
+                              <a
+                                href={audioUrl}
+                                download
+                                className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                                title="Скачать аудио"
+                              >
+                                <IconDownload />
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteAudio(call.id)}
+                                className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                title="Удалить аудио"
+                              >
+                                <IconTrash />
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
-                    {isExpanded && call.transcript?.text && (
-                      <tr>
-                        <td colSpan={7} className="px-4 py-3 bg-gray-50">
-                          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px] gap-4">
-                            <div>
-                              <div className="text-sm font-medium text-gray-900 mb-2">Диалог</div>
-                              <div className="space-y-3">
-                                {call.transcript.turns && call.transcript.turns.length > 0 ? (
-                                  <div className="flex flex-col gap-2 max-w-2xl">
-                                    {call.transcript.turns.map((turn, idx) => (
-                                  <div
-                                        key={`${call.id}-turn-${idx}`}
-                                        className={`flex ${
-                                          turn.speaker === 'operator' || turn.speaker === 'speaker-a'
-                                            ? 'justify-start'
-                                            : 'justify-end'
-                                        }`}
-                                      >
-                                        <div
-                                          className={`max-w-[85%] rounded-lg px-3 py-2 ${
-                                            turn.speaker === 'operator' || turn.speaker === 'speaker-a'
-                                              ? 'bg-gray-200 text-gray-900'
-                                              : 'bg-accent text-white'
-                                          }`}
-                                        >
-                                          <div className="text-xs font-semibold opacity-80 mb-0.5">
-                                            {turn.speaker === 'operator'
-                                              ? 'Оператор'
-                                              : turn.speaker === 'speaker-a'
-                                                ? 'Спикер A'
-                                                : turn.speaker === 'speaker-b'
-                                                  ? 'Спикер B'
-                                                  : 'Собеседник'}
-                                          </div>
-                                          <div
-                                            className="text-sm whitespace-pre-wrap leading-relaxed"
-                                            dangerouslySetInnerHTML={{ __html: highlightText(turn.text, keywords) }}
-                                          />
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : call.transcript.operatorText != null && call.transcript.abonentText != null ? (
-                                  <>
-                                    <div>
-                                      <div className="text-xs font-semibold text-gray-500 mb-1">Оператор</div>
-                                      <div
-                                        className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed"
-                                        dangerouslySetInnerHTML={{ __html: highlightText(call.transcript.operatorText, keywords) }}
-                                      />
-                                    </div>
-                                    <div>
-                                      <div className="text-xs font-semibold text-gray-500 mb-1">Собеседник</div>
-                                      <div
-                                        className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed"
-                                        dangerouslySetInnerHTML={{ __html: highlightText(call.transcript.abonentText, keywords) }}
-                                      />
-                                    </div>
-                                  </>
-                                ) : (
-                                  splitTranscript(call.transcript.text).map((chunk, idx) => (
-                                    <div key={`${call.id}-chunk-${idx}`}>
-                                      <div className="text-xs font-semibold text-gray-500 mb-1">{chunk.speaker}</div>
-                                      <div
-                                        className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed"
-                                        dangerouslySetInnerHTML={{ __html: highlightText(chunk.text, keywords) }}
-                                      />
-                                    </div>
-                                  ))
-                                )}
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-sm font-medium text-gray-900 mb-2">Тематики</div>
-                              <div className="space-y-3">
-                                {groupedTopics.size ? (
-                                  Array.from(groupedTopics.entries()).map(([topicName, items]) => (
-                                    <div key={`${call.id}-topic-${topicName}`}>
-                                      <div className="text-xs font-semibold text-gray-700">{topicName}</div>
-                                      <div className="mt-1 space-y-1">
-                                        {items.map((item, idx) => (
-                                          <div key={`${call.id}-topic-${topicName}-${idx}`} className="text-xs text-gray-600">
-                                            {item.keyword} ({item.occurrences})
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  ))
-                                ) : (
-                                  <div className="text-xs text-gray-500">Тематики не найдены</div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
                   </Fragment>
                 );
               })}
