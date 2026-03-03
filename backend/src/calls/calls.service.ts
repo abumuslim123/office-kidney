@@ -37,8 +37,11 @@ type UploadCallPayload = {
   durationSeconds?: string;
 };
 
+import { Logger } from '@nestjs/common';
+
 @Injectable()
 export class CallsService {
+  private readonly logger = new Logger(CallsService.name);
   private readonly audioDir: string;
 
   constructor(
@@ -98,7 +101,77 @@ export class CallsService {
     return matches ? matches.length : 0;
   }
 
-  /** Разбивает текст на фразы по переносам строк и границам предложений, затем чередует оператор/собеседник. */
+  /**
+   * Извлекает сегменты с таймстемпами из verbose_json ответа Whisper.
+   * Формат: { segments: [{ start, end, text }, ...] }
+   */
+  private getTimedSegments(response: unknown): { start: number; end: number; text: string }[] {
+    if (!response || typeof response !== 'object') return [];
+    const o = response as Record<string, unknown>;
+    const segments = o.segments ?? (o.data && typeof o.data === 'object' && (o.data as Record<string, unknown>).segments);
+    if (!Array.isArray(segments)) return [];
+    return segments
+      .map((seg) => {
+        if (!seg || typeof seg !== 'object') return null;
+        const s = seg as Record<string, unknown>;
+        const start = typeof s.start === 'number' ? s.start : NaN;
+        const end = typeof s.end === 'number' ? s.end : NaN;
+        const text = (typeof s.text === 'string' ? s.text.trim() : '');
+        if (!text || isNaN(start)) return null;
+        return { start, end: isNaN(end) ? start : end, text };
+      })
+      .filter((s): s is { start: number; end: number; text: string } => Boolean(s));
+  }
+
+  /**
+   * Извлекает слова с таймстемпами из verbose_json ответа Whisper.
+   * Формат: { words: [{ word, start, end }, ...] }
+   */
+  private getTimedWords(response: unknown): { word: string; start: number; end: number }[] {
+    if (!response || typeof response !== 'object') return [];
+    const o = response as Record<string, unknown>;
+    const words = o.words ?? (o.data && typeof o.data === 'object' && (o.data as Record<string, unknown>).words);
+    if (!Array.isArray(words)) return [];
+    return words
+      .map((w) => {
+        if (!w || typeof w !== 'object') return null;
+        const item = w as Record<string, unknown>;
+        const word = typeof item.word === 'string' ? item.word.trim() : '';
+        const start = typeof item.start === 'number' ? item.start : NaN;
+        const end = typeof item.end === 'number' ? item.end : NaN;
+        if (!word || isNaN(start)) return null;
+        return { word, start, end: isNaN(end) ? start : end };
+      })
+      .filter((w): w is { word: string; start: number; end: number } => Boolean(w));
+  }
+
+  /**
+   * Собирает хронологический диалог из двух каналов по таймстемпам сегментов.
+   * Соседние реплики одного спикера склеиваются в одну. Сохраняет start/end.
+   */
+  private mergeSegmentsByTimestamp(
+    operatorSegments: { start: number; end: number; text: string }[],
+    abonentSegments: { start: number; end: number; text: string }[],
+  ): { speaker: 'operator' | 'abonent'; text: string; start: number; end: number }[] {
+    const tagged = [
+      ...operatorSegments.map((s) => ({ ...s, speaker: 'operator' as const })),
+      ...abonentSegments.map((s) => ({ ...s, speaker: 'abonent' as const })),
+    ].sort((a, b) => a.start - b.start);
+
+    const turns: { speaker: 'operator' | 'abonent'; text: string; start: number; end: number }[] = [];
+    for (const seg of tagged) {
+      const last = turns[turns.length - 1];
+      if (last && last.speaker === seg.speaker) {
+        last.text += ' ' + seg.text;
+        last.end = Math.max(last.end, seg.end);
+      } else {
+        turns.push({ speaker: seg.speaker, text: seg.text, start: seg.start, end: seg.end });
+      }
+    }
+    return turns;
+  }
+
+  /** Fallback: наивное чередование фраз, если таймстемпы недоступны. */
   private buildTurnsFromOperatorAbonent(
     operatorText: string,
     abonentText: string,
@@ -214,6 +287,34 @@ export class CallsService {
       transcript: transcriptMap.get(call.id) || null,
       matches: matchesMap.get(call.id) || [],
     }));
+  }
+
+  async getCall(callId: string) {
+    const call = await this.callRepo.findOne({ where: { id: callId } });
+    if (!call) throw new NotFoundException('Звонок не найден');
+
+    const transcript = await this.transcriptRepo.findOne({ where: { callId } });
+
+    const matchRows = await this.matchRepo
+      .createQueryBuilder('m')
+      .leftJoin(CallTopic, 't', 't.id = m."topicId"')
+      .select('m."callId"', 'callId')
+      .addSelect('m."topicId"', 'topicId')
+      .addSelect('t.name', 'topicName')
+      .addSelect('m.keyword', 'keyword')
+      .addSelect('m.occurrences', 'occurrences')
+      .where('m."callId" = :callId', { callId })
+      .orderBy('t.name', 'ASC')
+      .getRawMany<{ callId: string; topicId: string; topicName: string; keyword: string; occurrences: string }>();
+
+    const matches = matchRows.map((row) => ({
+      topicId: row.topicId,
+      topicName: row.topicName,
+      keyword: row.keyword,
+      occurrences: parseInt(row.occurrences, 10) || 0,
+    }));
+
+    return { ...call, transcript: transcript || null, matches };
   }
 
   async getStats(filters: CallFilters) {
@@ -475,10 +576,12 @@ export class CallsService {
         })
         .filter((seg): seg is { speaker: string; text: string } => Boolean(seg));
     };
-    const normalizeSpeaker = (raw: string): 'speaker-a' | 'speaker-b' => {
+    const normalizeSpeaker = (raw: string): 'operator' | 'abonent' => {
       const value = raw.toLowerCase();
-      if (value.includes('b') || value.includes('2')) return 'speaker-b';
-      return 'speaker-a';
+      if (value.includes('собеседник') || value.includes('пациент') || value.includes('абонент') || value.includes('клиент')) return 'abonent';
+      if (value.includes('оператор')) return 'operator';
+      if (value.includes('b') || value.includes('2')) return 'abonent';
+      return 'operator';
     };
 
     let tempPaths: { leftPath: string; rightPath: string } | null = null;
@@ -495,15 +598,31 @@ export class CallsService {
       let abonentText: string | null = null;
       let response: unknown;
 
-      let turnsFromDiarize: { speaker: 'speaker-a' | 'speaker-b'; text: string }[] | null = null;
+      let turnsFromDiarize: { speaker: 'operator' | 'abonent'; text: string }[] | null = null;
+
+      let stereoTurns: { speaker: 'operator' | 'abonent'; text: string; start: number; end: number }[] | null = null;
+      let allWords: { word: string; start: number; end: number; speaker: 'operator' | 'abonent' }[] | null = null;
 
       if (tempPaths) {
         const [leftResponse, rightResponse] = await Promise.all([
-          this.audioProvider.transcribeAudio(tempPaths.leftPath, 'operator.wav'),
-          this.audioProvider.transcribeAudio(tempPaths.rightPath, 'abonent.wav'),
+          this.audioProvider.transcribeAudio(tempPaths.leftPath, 'channel_left.wav'),
+          this.audioProvider.transcribeAudio(tempPaths.rightPath, 'channel_right.wav'),
         ]);
-        operatorText = pickText(leftResponse) || null;
-        abonentText = pickText(rightResponse) || null;
+
+        // Определяем, какой канал — оператор, по приветствию в начале текста
+        const leftText = pickText(leftResponse) || '';
+        const rightText = pickText(rightResponse) || '';
+        const greetingPattern = /здравствуйте|добрый\s*(день|вечер|утро)|чем\s*(могу|можем)\s*помочь|клиника|кидней|kidney|слушаю\s*вас|алл[её]/i;
+        const leftHasGreeting = greetingPattern.test(leftText.slice(0, 300));
+        const rightHasGreeting = greetingPattern.test(rightText.slice(0, 300));
+        const leftIsOperator = leftHasGreeting || !rightHasGreeting;
+        this.logger.log(`Channel detection: left=${leftHasGreeting ? 'greeting' : 'no-greeting'}, right=${rightHasGreeting ? 'greeting' : 'no-greeting'}, leftIsOperator=${leftIsOperator}`);
+
+        const operatorResponse = leftIsOperator ? leftResponse : rightResponse;
+        const abonentResponse = leftIsOperator ? rightResponse : leftResponse;
+
+        operatorText = pickText(operatorResponse) || null;
+        abonentText = pickText(abonentResponse) || null;
         text =
           (operatorText ? `Оператор:\n${operatorText}` : '') +
           (operatorText && abonentText ? '\n\n' : '') +
@@ -511,20 +630,67 @@ export class CallsService {
         if (!text.trim()) {
           throw new BadRequestException('Не удалось получить текст транскрибации');
         }
-        response = leftResponse;
+
+        const opSegments = this.getTimedSegments(operatorResponse);
+        const abSegments = this.getTimedSegments(abonentResponse);
+        if (opSegments.length || abSegments.length) {
+          stereoTurns = this.mergeSegmentsByTimestamp(opSegments, abSegments);
+        }
+
+        // Извлекаем word-level timestamps из обоих каналов
+        const opWords = this.getTimedWords(operatorResponse).map(w => ({ ...w, speaker: 'operator' as const }));
+        const abWords = this.getTimedWords(abonentResponse).map(w => ({ ...w, speaker: 'abonent' as const }));
+        if (opWords.length || abWords.length) {
+          allWords = [...opWords, ...abWords].sort((a, b) => a.start - b.start);
+        }
+
+        response = operatorResponse;
       } else {
-        response = await this.audioProvider.transcribeAudio(audioPath, path.basename(audioPath));
-        if (diarizeModel) {
-          const diarizeSegments = getDiarizeSegments(response);
-          if (diarizeSegments.length) {
-            turnsFromDiarize = diarizeSegments.map((seg) => ({
-              speaker: normalizeSpeaker(seg.speaker),
-              text: seg.text,
+        // Стерео-сплит не сработал (моно файл или нет ffmpeg) — используем diarize для определения спикеров
+        this.logger.log('Stereo split unavailable, falling back to diarize transcription');
+        response = await this.audioProvider.transcribeWithDiarize(audioPath, path.basename(audioPath));
+        const diarizeSegments = getDiarizeSegments(response);
+        if (diarizeSegments.length) {
+          // API вернул сегменты с метками спикеров
+          turnsFromDiarize = diarizeSegments.map((seg) => ({
+            speaker: normalizeSpeaker(seg.speaker),
+            text: seg.text,
+          }));
+        } else {
+          // API вернул текст без сегментов — разбиваем по строкам, чередуем оператор/собеседник
+          const rawText = pickText(response);
+          const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+          if (lines.length > 1) {
+            // Определяем, кто говорит первым: оператор обычно приветствует и представляет клинику
+            const greetingPattern = /здравствуйте|добрый\s*(день|вечер|утро)|чем\s*(могу|можем)\s*помочь|клиника|кидней|kidney|слушаю\s*вас|алл[её]/i;
+            const firstIsOperator = greetingPattern.test(lines[0]);
+            turnsFromDiarize = lines.map((line, i) => ({
+              speaker: ((i % 2 === 0) === firstIsOperator ? 'operator' : 'abonent') as 'operator' | 'abonent',
+              text: line,
             }));
-            text = turnsFromDiarize.map((seg) => seg.text).join('\n');
-          } else {
-            text = pickText(response);
           }
+        }
+
+        if (turnsFromDiarize && turnsFromDiarize.length) {
+          // Склеиваем соседние реплики одного спикера
+          const merged: typeof turnsFromDiarize = [];
+          for (const turn of turnsFromDiarize) {
+            const last = merged[merged.length - 1];
+            if (last && last.speaker === turn.speaker) {
+              last.text += ' ' + turn.text;
+            } else {
+              merged.push({ ...turn });
+            }
+          }
+          turnsFromDiarize = merged;
+
+          operatorText = turnsFromDiarize.filter(t => t.speaker === 'operator').map(t => t.text).join(' ') || null;
+          abonentText = turnsFromDiarize.filter(t => t.speaker === 'abonent').map(t => t.text).join(' ') || null;
+          text =
+            (operatorText ? `Оператор:\n${operatorText}` : '') +
+            (operatorText && abonentText ? '\n\n' : '') +
+            (abonentText ? `Собеседник:\n${abonentText}` : '');
+          if (!text.trim()) text = turnsFromDiarize.map((seg) => seg.text).join('\n');
         } else {
           text = pickText(response);
         }
@@ -554,15 +720,27 @@ export class CallsService {
           (response as { meta?: { silence_duration_seconds?: number } }).meta?.silence_duration_seconds
         )) as number | undefined;
 
-      const durationSeconds = Number(durationRaw);
-      const speechSeconds = Number(speechRaw);
-      const silenceSeconds = Number(silenceRaw);
+      let durationSeconds = Number(durationRaw);
+      let speechSeconds = Number(speechRaw);
+      let silenceSeconds = Number(silenceRaw);
 
-      const turns: { speaker: 'operator' | 'abonent' | 'speaker-a' | 'speaker-b'; text: string }[] | null = turnsFromDiarize
+      // Если API не вернул речь/молчание — вычисляем из сегментов
+      if ((!Number.isFinite(speechSeconds) || speechSeconds <= 0) && stereoTurns && stereoTurns.length > 0) {
+        speechSeconds = stereoTurns.reduce((sum, t) => sum + (t.end - t.start), 0);
+      }
+      if (Number.isFinite(durationSeconds) && durationSeconds > 0 && Number.isFinite(speechSeconds) && speechSeconds > 0) {
+        if (!Number.isFinite(silenceSeconds) || silenceSeconds <= 0) {
+          silenceSeconds = Math.max(0, durationSeconds - speechSeconds);
+        }
+      }
+
+      const turns: { speaker: 'operator' | 'abonent'; text: string; start?: number; end?: number }[] | null = turnsFromDiarize
         ? turnsFromDiarize
-        : operatorText != null && operatorText !== '' && abonentText != null && abonentText !== ''
-          ? this.buildTurnsFromOperatorAbonent(operatorText, abonentText)
-          : null;
+        : stereoTurns && stereoTurns.length > 0
+          ? stereoTurns
+          : operatorText != null && operatorText !== '' && abonentText != null && abonentText !== ''
+            ? this.buildTurnsFromOperatorAbonent(operatorText, abonentText)
+            : null;
 
       let transcript = await this.transcriptRepo.findOne({ where: { callId } });
       if (!transcript) {
@@ -572,6 +750,7 @@ export class CallsService {
           operatorText,
           abonentText,
           turns,
+          words: allWords,
           language,
           provider: 'aitunnel',
         });
@@ -580,6 +759,7 @@ export class CallsService {
         transcript.operatorText = operatorText;
         transcript.abonentText = abonentText;
         transcript.turns = turns;
+        transcript.words = allWords;
         transcript.language = language;
         transcript.provider = 'aitunnel';
       }
