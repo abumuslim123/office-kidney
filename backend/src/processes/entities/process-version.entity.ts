@@ -43,6 +43,9 @@ export class ProcessVersion {
   @CreateDateColumn()
   changedAt: Date;
 
+  @Column({ type: 'text', nullable: true })
+  changeReason: string | null;
+
   @Column({ type: 'jsonb', nullable: true })
   checklist: {
     items?: Array<{ id?: string; title: string; assignee?: string; completed?: boolean }>;

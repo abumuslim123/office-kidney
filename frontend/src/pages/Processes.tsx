@@ -35,6 +35,7 @@ type ProcessVersion = {
   version: number;
   descriptionDoc: { doc?: Record<string, unknown>; text?: string };
   diffData: { changes: BlockChange[] } | null;
+  changeReason?: string | null;
   changedAt: string;
   changedBy?: { id: string; displayName?: string; login?: string } | null;
   checklist?: {
@@ -63,7 +64,12 @@ type ProcessActivityItem = {
   id: string;
   processId: string;
   versionId: string | null;
-  actionType: 'view_process' | 'view_version' | 'acknowledge_latest' | 'checklist_approved';
+  actionType:
+    | 'view_process'
+    | 'view_version'
+    | 'acknowledge_latest'
+    | 'checklist_approved'
+    | 'version_created';
   createdAt: string;
   meta: Record<string, unknown> | null;
   user: {
@@ -343,6 +349,10 @@ function getActivityActionText(item: ProcessActivityItem): string {
     const n = item.meta && typeof item.meta.itemsCount === 'number' ? item.meta.itemsCount : null;
     return n != null ? `Утвердил чек-лист (${n} ${n === 1 ? 'пункт' : n < 5 ? 'пункта' : 'пунктов'})` : 'Утвердил чек-лист';
   }
+  if (item.actionType === 'version_created') {
+    const version = item.version?.version;
+    return version ? `Создал итерацию #${version}` : 'Создал итерацию';
+  }
   const version = item.version?.version;
   return version
     ? `Нажал «Ознакомился» с итерацией #${version}`
@@ -383,6 +393,7 @@ export default function Processes() {
   const [processDocDraft, setProcessDocDraft] = useState<Record<string, unknown> | null>(null);
   const [editDocDraft, setEditDocDraft] = useState<Record<string, unknown> | null>(null);
   const [iterationDocDraft, setIterationDocDraft] = useState<Record<string, unknown> | null>(null);
+  const [iterationChangeReason, setIterationChangeReason] = useState('');
   const [isIterationMode, setIsIterationMode] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -726,12 +737,14 @@ export default function Processes() {
   const startIteration = () => {
     if (!selectedProcess || !canEdit) return;
     setIterationDocDraft(selectedProcess.currentDescriptionDoc?.doc ?? editDocDraft ?? null);
+    setIterationChangeReason('');
     setIsIterationMode(true);
   };
 
   const cancelIteration = () => {
     setIsIterationMode(false);
     setIterationDocDraft(null);
+    setIterationChangeReason('');
   };
 
   const saveIteration = async () => {
@@ -741,8 +754,15 @@ export default function Processes() {
       const processId = selectedProcess.id;
       const departmentId = selectedProcess.departmentId;
       const doc = iterationDocDraft ?? undefined;
-      const body: { descriptionDoc: { doc?: Record<string, unknown> }; diffData?: { changes: BlockChange[] } } = {
+      const body: {
+        descriptionDoc: { doc?: Record<string, unknown> };
+        diffData?: { changes: BlockChange[] };
+        isIteration: boolean;
+        changeReason: string;
+      } = {
         descriptionDoc: { doc },
+        isIteration: true,
+        changeReason: iterationChangeReason.trim(),
       };
       if (doc && hasDocTaggedMarks(doc)) {
         const changes = buildDiffFromTaggedDoc(
@@ -756,6 +776,7 @@ export default function Processes() {
       await Promise.all([loadProcess(processId), loadDepartments(), loadItems(departmentId)]);
       setIsIterationMode(false);
       setIterationDocDraft(null);
+      setIterationChangeReason('');
     } finally {
       setSaving(false);
     }
@@ -1346,10 +1367,20 @@ export default function Processes() {
                 </div>
               )}
               {canEdit && isIterationMode && (
-                <div className="mb-3 flex gap-2">
+                <div className="mb-3">
+                  <label className="block text-xs text-gray-600 mb-1">
+                    Комментарий: почему внесли изменения
+                  </label>
+                  <textarea
+                    value={iterationChangeReason}
+                    onChange={(e) => setIterationChangeReason(e.target.value)}
+                    placeholder="Кратко опишите причину изменений"
+                    className="w-full mb-2 px-3 py-2 border border-gray-300 rounded text-sm min-h-[72px]"
+                  />
+                  <div className="flex gap-2">
                   <button
                     type="button"
-                    disabled={saving}
+                    disabled={saving || !iterationChangeReason.trim()}
                     onClick={saveIteration}
                     className="px-3 py-2 bg-accent text-white text-sm rounded hover:bg-accent-hover disabled:opacity-50"
                   >
@@ -1362,6 +1393,7 @@ export default function Processes() {
                   >
                     Отмена
                   </button>
+                  </div>
                 </div>
               )}
 
@@ -1373,6 +1405,15 @@ export default function Processes() {
                   if (isIterationMode) setIterationDocDraft(doc);
                 }}
               />
+
+              {selectedProcess?.latestVersion?.changeReason ? (
+                <div className="mt-3 border border-gray-200 rounded p-3 bg-gray-50">
+                  <p className="text-xs font-medium text-gray-600 mb-1">Комментарий к последней итерации</p>
+                  <p className="text-sm text-gray-800 whitespace-pre-wrap">
+                    {selectedProcess.latestVersion.changeReason}
+                  </p>
+                </div>
+              ) : null}
 
               {selectedProcess?.latestVersion?.checklist ? (
                 (() => {
@@ -1798,6 +1839,17 @@ export default function Processes() {
                       </div>
                     </div>
 
+                    {selectedVersion.changeReason ? (
+                      <div className="mb-3 border border-gray-200 rounded p-3 bg-gray-50">
+                        <p className="text-xs font-medium text-gray-600 mb-1">
+                          Комментарий к изменениям
+                        </p>
+                        <p className="text-sm text-gray-800 whitespace-pre-wrap">
+                          {selectedVersion.changeReason}
+                        </p>
+                      </div>
+                    ) : null}
+
                     {compareMode && previousVersion ? (
                       <div className="grid grid-cols-2 gap-4 mb-3">
                         <div>
@@ -1984,6 +2036,12 @@ export default function Processes() {
                         {item.user.displayName || item.user.login}
                       </div>
                       <div className="text-xs text-gray-700 mt-1">{getActivityActionText(item)}</div>
+                      {typeof item.meta?.changeReason === 'string' &&
+                      item.meta.changeReason.trim() ? (
+                        <div className="text-xs text-gray-700 mt-1 whitespace-pre-wrap">
+                          Причина: {item.meta.changeReason}
+                        </div>
+                      ) : null}
                       <div className="text-xs text-gray-500 mt-1">{formatDate(item.createdAt)}</div>
                     </div>
                   ))}

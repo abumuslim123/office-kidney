@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Kidney Office TV</string>
+    <string name="loading_video">Загрузка видео…</string>
+    <string name="loading_video_percent">Загрузка видео… %1$d%%</string>
+    <string name="loading_photo">Загрузка фото…</string>
+    <string name="loading_photo_percent">Загрузка фото… %1$d%%</string>
+    <string name="no_photos">Фото недоступны</string>
+</resources>

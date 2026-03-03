@@ -443,6 +443,11 @@ export class ProcessesService {
     const prevDoc = lastVersion?.descriptionDoc ?? process.currentDescriptionDoc;
     const prevText = this.extractText(prevDoc);
     const nextText = this.extractText(nextDoc);
+    const isIteration = dto.isIteration === true;
+    const changeReason = typeof dto.changeReason === 'string' ? dto.changeReason.trim() : '';
+    if (isIteration && !changeReason) {
+      throw new BadRequestException('Укажите комментарий: почему внесли изменения');
+    }
     const hasChecklistByRole =
       Array.isArray(dto.checklist?.checklistsByRole) && dto.checklist.checklistsByRole.length > 0;
     const hasChecklistItems =
@@ -507,12 +512,25 @@ export class ProcessesService {
         diffData,
         diffDataCorrections: [],
         changedById: currentUser.id,
+        changeReason: isIteration ? changeReason : null,
         checklist: checklistPayload,
       }),
     );
     process.currentDescriptionDoc = nextDoc;
     await this.processesRepo.save(process);
     await this.upsertReadState(currentUser.id, process.id, nextVersion);
+    if (isIteration) {
+      await this.logProcessActivity({
+        processId: process.id,
+        userId: currentUser.id,
+        versionId: newVersion.id,
+        actionType: 'version_created',
+        meta: {
+          version: newVersion.version,
+          changeReason,
+        },
+      });
+    }
     if (hasChecklist && checklistPayload) {
       const itemsCount = checklistPayload.checklistsByRole
         ? checklistPayload.checklistsByRole.reduce(
