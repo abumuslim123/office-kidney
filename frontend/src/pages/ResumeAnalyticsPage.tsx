@@ -10,6 +10,13 @@ import type { AnalyticsData } from '../lib/resume-types';
 import { BRANCHES, GENDER_PIE_COLORS, DOCTOR_TYPE_PIE_COLORS, formatDateTime } from '../lib/resume-constants';
 
 const COLORS = ['#2563eb', '#7c3aed', '#059669', '#d97706', '#dc2626', '#0891b2', '#4f46e5', '#be185d'];
+const SCORE_BAR_COLORS: Record<string, string> = {
+  '0-19': '#ef4444',
+  '20-39': '#f97316',
+  '40-59': '#eab308',
+  '60-79': '#22c55e',
+  '80-100': '#10b981',
+};
 const PERIODS = [
   { value: '7', label: '7 дней' },
   { value: '30', label: '30 дней' },
@@ -251,6 +258,25 @@ export default function ResumeAnalyticsPage() {
                 <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip />
                 <Bar dataKey="count" fill="#7c3aed" radius={[4, 4, 0, 0]} name="Кандидатов" />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        )}
+
+        {/* AI Score distribution */}
+        {data.scoreDistribution && data.scoreDistribution.some((b) => b.count > 0) && (
+          <ChartCard title="Распределение AI-оценок">
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={data.scoreDistribution}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip />
+                <Bar dataKey="count" radius={[4, 4, 0, 0]} name="Кандидатов">
+                  {data.scoreDistribution.map((entry) => (
+                    <Cell key={entry.name} fill={SCORE_BAR_COLORS[entry.name] || '#6b7280'} />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>

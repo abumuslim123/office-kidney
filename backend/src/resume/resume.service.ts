@@ -46,6 +46,12 @@ import { ResumeDuplicateDetectionService, type DuplicateCheckResult } from './re
 import { parseCvText, evaluateParsingQuality } from './ai/parse-cv';
 import { buildCvParsingPrompt } from './ai/prompts';
 import type { CvParsedOutput } from './ai/schemas';
+import { ResumeCandidateScore } from './entities/resume-candidate-score.entity';
+import { buildCompactProfile } from './ai/embedding';
+import { buildScoringPrompt } from './ai/scoring-prompt';
+import { generateAiScoring } from './ai/score-candidate';
+import { OLLAMA_MODEL } from './ai/client';
+import { computePoolStats, computeDeterministicScores } from './ai/deterministic-scoring';
 
 import { CreateNoteDto } from './dto/create-note.dto';
 import { CreateTagDto } from './dto/create-tag.dto';
@@ -211,6 +217,7 @@ export interface AnalyticsData {
   branchDistribution: BranchDistributionItem[];
   branchCoverage: BranchCoverageRow[];
   topTags: TagCount[];
+  scoreDistribution: { name: string; count: number }[];
   expiringAccreditations: {
     id: string;
     fullName: string;
@@ -234,6 +241,8 @@ export interface CandidateListFilters {
   workCity?: string;
   educationCity?: string;
   tag?: string;
+  scoreMin?: number;
+  scoreMax?: number;
   page?: number;
   limit?: number;
   sort?: string;
@@ -250,6 +259,7 @@ const ALLOWED_SORT_COLUMNS: Record<string, string> = {
   status: 'c.status',
   priority: 'c.priority',
   processingStatus: 'c.processingStatus',
+  aiScore: 'c.aiScore',
 };
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -281,6 +291,8 @@ export class ResumeService {
     private telegramChatRepo: Repository<ResumeTelegramChat>,
     @InjectRepository(ResumeSpecialization)
     private specializationRepo: Repository<ResumeSpecialization>,
+    @InjectRepository(ResumeCandidateScore)
+    private scoreRepo: Repository<ResumeCandidateScore>,
     private config: ConfigService,
     private duplicateService: ResumeDuplicateDetectionService,
     private dataSource: DataSource,
@@ -598,6 +610,15 @@ export class ResumeService {
         processingStatus: ResumeProcessingStatus.COMPLETED,
         aiConfidence,
       });
+
+      // Step 6: AI Scoring (не блокирует основной pipeline)
+      try {
+        await this.scoreCandidateInternal(candidateId);
+      } catch (scoreError) {
+        this.logger.warn(
+          `AI scoring failed for ${candidateId}: ${scoreError instanceof Error ? scoreError.message : 'unknown'}`,
+        );
+      }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Неизвестная ошибка';
@@ -909,6 +930,14 @@ export class ResumeService {
       qb.andWhere('tags.label = :tagLabel', { tagLabel: filters.tag });
     }
 
+    if (filters.scoreMin !== undefined) {
+      qb.andWhere('c.aiScore >= :scoreMin', { scoreMin: filters.scoreMin });
+    }
+
+    if (filters.scoreMax !== undefined) {
+      qb.andWhere('c.aiScore <= :scoreMax', { scoreMax: filters.scoreMax });
+    }
+
     // Dynamic sorting with whitelist
     const sortColumn = ALLOWED_SORT_COLUMNS[filters.sort || ''] || 'c.createdAt';
     const sortOrder: 'ASC' | 'DESC' = filters.order?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
@@ -1097,6 +1126,30 @@ export class ResumeService {
     }
 
     await this.candidateRepo.update(id, {
+      processingStatus: ResumeProcessingStatus.PENDING,
+      processingError: null,
+      aiConfidence: null,
+    });
+
+    this.enqueueProcessing(id);
+  }
+
+  /**
+   * Дополнить резюме кандидата текстом и перепарсить.
+   * Текст дописывается к rawText через разделитель, затем запускается полный пайплайн обработки.
+   */
+  async supplementCandidate(id: string, additionalText: string): Promise<void> {
+    const candidate = await this.candidateRepo.findOne({ where: { id } });
+
+    if (!candidate) {
+      throw new NotFoundException('Кандидат не найден');
+    }
+
+    const separator = '\n\n--- Дополнение от рекрутера ---\n\n';
+    const newRawText = (candidate.rawText || '') + separator + additionalText.trim();
+
+    await this.candidateRepo.update(id, {
+      rawText: newRawText,
       processingStatus: ResumeProcessingStatus.PENDING,
       processingError: null,
       aiConfidence: null,
@@ -1726,6 +1779,7 @@ export class ResumeService {
       branchCandidates,
       coverageCandidates,
       tagCandidateIds,
+      scoredCandidates,
       expiringAccreditations,
     ] = await Promise.all([
       // 1. Total current
@@ -1916,7 +1970,32 @@ export class ResumeService {
       // 17. Tag candidate IDs (for period filter)
       currentQb().select(['c.id']).getMany(),
 
-      // 18. Expiring accreditations detail (next 90 days)
+      // 18. AI score distribution + avg score
+      (() => {
+        const sQb = this.candidateRepo
+          .createQueryBuilder('c')
+          .select(['c.aiScore'])
+          .where('c.aiScore IS NOT NULL')
+          .andWhere('c.priority != :deleted', {
+            deleted: ResumeCandidatePriority.DELETED,
+          });
+        sQb.andWhere((subQb) => {
+          const subQuery = subQb
+            .subQuery()
+            .select('1')
+            .from(ResumeCandidateTag, 'dup_tag')
+            .where('dup_tag.candidateId = c.id')
+            .andWhere("dup_tag.label = 'Возможный дубликат'")
+            .getQuery();
+          return `NOT EXISTS ${subQuery}`;
+        });
+        if (branch) {
+          sQb.andWhere(':branch = ANY(c.branches)', { branch });
+        }
+        return sQb.getMany();
+      })(),
+
+      // 19. Expiring accreditations detail (next 90 days)
       (() => {
         const expQb = this.candidateRepo
           .createQueryBuilder('c')
@@ -2306,6 +2385,41 @@ export class ResumeService {
         .slice(0, 15);
     }
 
+    // ── Score distribution ────────────────────────────────────
+
+    const scoreBuckets = [
+      { name: '0-19', min: 0, max: 20, count: 0 },
+      { name: '20-39', min: 20, max: 40, count: 0 },
+      { name: '40-59', min: 40, max: 60, count: 0 },
+      { name: '60-79', min: 60, max: 80, count: 0 },
+      { name: '80-100', min: 80, max: 101, count: 0 },
+    ];
+    let scoreSum = 0;
+    scoredCandidates.forEach((c) => {
+      const s = c.aiScore!;
+      scoreSum += s;
+      const bucket = scoreBuckets.find((b) => s >= b.min && s < b.max);
+      if (bucket) bucket.count++;
+    });
+    const scoreDistribution = scoreBuckets.map((b) => ({
+      name: b.name,
+      count: b.count,
+    }));
+
+    if (scoredCandidates.length > 0) {
+      const avgScore = Math.round((scoreSum / scoredCandidates.length) * 10) / 10;
+      kpis.push({
+        key: 'avgScore',
+        title: 'Средний AI-балл',
+        value: avgScore,
+        previousValue: null,
+        format: 'decimal',
+        icon: 'Brain',
+        color: 'text-violet-600',
+        trendDirection: 'up-good',
+      });
+    }
+
     return {
       kpis,
       timeline,
@@ -2318,6 +2432,7 @@ export class ResumeService {
       branchDistribution,
       branchCoverage,
       topTags,
+      scoreDistribution,
       expiringAccreditations: expiringAccreditations.map((c) => ({
         id: c.id,
         fullName: c.fullName,
@@ -2791,5 +2906,281 @@ export class ResumeService {
     candidateId: string,
   ): Promise<DuplicateCheckResult> {
     return this.duplicateService.checkAndHandleDuplicates(candidateId);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  AI Scoring
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Внутренний метод: генерация эмбеддинга, поиск похожих, AI-оценка.
+   */
+  private async scoreCandidateInternal(candidateId: string): Promise<ResumeCandidateScore> {
+    const candidate = await this.candidateRepo.findOne({
+      where: { id: candidateId },
+      relations: ['workHistory', 'education', 'cmeCourses'],
+    });
+    if (!candidate) throw new NotFoundException('Кандидат не найден');
+
+    // 1. Загрузить пул кандидатов (по специализации, fallback на весь пул)
+    const poolCandidates = await this.getPoolCandidates(candidate.specialization);
+
+    // 2. Рассчитать статистику пула
+    const poolStats = computePoolStats(poolCandidates);
+
+    // 3. Рассчитать детерминированные sub-scores
+    const detScores = computeDeterministicScores(candidate, poolStats);
+
+    // 4. Найти похожих кандидатов через SQL
+    const similarProfiles = await this.findSimilarBySQL(
+      candidateId,
+      candidate.specialization,
+      candidate.totalExperienceYears,
+      7,
+    );
+
+    // 5. Получить rawText
+    const rawText = candidate.rawText || null;
+
+    // 6. Статистика по специализации (для промпта)
+    const specStats = await this.getSpecializationStats(candidate.specialization);
+
+    // 7. AI качественная оценка
+    const prompt = buildScoringPrompt(rawText, similarProfiles, detScores, poolStats, specStats);
+    const aiResult = await generateAiScoring(prompt);
+
+    // 8. Composite score: 75% deterministic + 25% AI
+    const compositeScore = Math.round(
+      detScores.composite * 0.75 + aiResult.qualitativeScore * 0.25,
+    );
+
+    // 9. Percentile rank
+    const percentileRank = await this.computePercentileRank(
+      candidate.specialization,
+      compositeScore,
+    );
+
+    const totalInGroup = candidate.specialization
+      ? await this.scoreRepo.count({
+          where: { specialization: candidate.specialization, isCurrent: true },
+        })
+      : 0;
+
+    // 10. Деактивировать предыдущие оценки
+    await this.scoreRepo.update(
+      { candidateId, isCurrent: true },
+      { isCurrent: false },
+    );
+
+    // 11. Определить версию
+    const lastScore = await this.scoreRepo.findOne({
+      where: { candidateId },
+      order: { version: 'DESC' },
+    });
+
+    // 12. Сохранить новую оценку
+    const score = this.scoreRepo.create({
+      candidateId,
+      totalScore: compositeScore,
+      aiSummary: aiResult.summary,
+      strengths: aiResult.strengths,
+      weaknesses: aiResult.weaknesses,
+      highlights: aiResult.highlights,
+      comparison: aiResult.comparison,
+      percentileRank,
+      specialization: candidate.specialization,
+      totalCandidatesInGroup: totalInGroup + 1,
+      version: (lastScore?.version ?? 0) + 1,
+      isCurrent: true,
+      modelVersion: OLLAMA_MODEL,
+      // Sub-scores
+      experienceScore: detScores.experience,
+      educationScore: detScores.education,
+      qualificationScore: detScores.qualification,
+      developmentScore: detScores.development,
+      aiQualitativeScore: aiResult.qualitativeScore,
+      deterministicScore: detScores.composite,
+      confidence: detScores.confidence,
+    });
+    const saved = await this.scoreRepo.save(score);
+
+    // 13. Обновить кеш
+    await this.candidateRepo.update(candidateId, { aiScore: compositeScore });
+
+    this.logger.log(
+      `Hybrid scoring completed for ${candidateId}: det=${detScores.composite} ai=${aiResult.qualitativeScore} total=${compositeScore}/100 confidence=${detScores.confidence}%`,
+    );
+
+    return saved;
+  }
+
+  /**
+   * Загрузить кандидатов пула для расчёта z-score.
+   * Сначала по специализации, если < 5 — fallback на весь пул.
+   */
+  private async getPoolCandidates(specialization: string | null): Promise<ResumeCandidate[]> {
+    const baseQb = this.candidateRepo.createQueryBuilder('c')
+      .leftJoinAndSelect('c.workHistory', 'wh')
+      .leftJoinAndSelect('c.education', 'edu')
+      .leftJoinAndSelect('c.cmeCourses', 'cme')
+      .where('c.priority NOT IN (:...hidden)', {
+        hidden: [ResumeCandidatePriority.DELETED, ResumeCandidatePriority.ARCHIVE],
+      });
+
+    if (specialization) {
+      const specCandidates = await baseQb.clone()
+        .andWhere('c.specialization = :spec', { spec: specialization })
+        .getMany();
+      if (specCandidates.length >= 5) return specCandidates;
+    }
+
+    return baseQb.getMany();
+  }
+
+  /**
+   * Найти похожих кандидатов через SQL (по специализации + близость стажа).
+   * Заменяет pgvector cosine search — проще и надёжнее.
+   */
+  private async findSimilarBySQL(
+    candidateId: string,
+    specialization: string | null,
+    experienceYears: number | null,
+    limit = 7,
+  ): Promise<string[]> {
+    try {
+      const qb = this.candidateRepo.createQueryBuilder('c')
+        .leftJoinAndSelect('c.workHistory', 'wh')
+        .where('c.id != :id', { id: candidateId })
+        .andWhere('c.priority NOT IN (:...hidden)', {
+          hidden: [ResumeCandidatePriority.DELETED, ResumeCandidatePriority.ARCHIVE],
+        });
+
+      if (specialization) {
+        qb.andWhere('c.specialization = :spec', { spec: specialization });
+      }
+
+      if (experienceYears != null) {
+        qb.addSelect(
+          `ABS(COALESCE(c."totalExperienceYears", 0) - :exp)`,
+          'exp_diff',
+        ).setParameter('exp', experienceYears)
+        .orderBy('exp_diff', 'ASC');
+      } else {
+        qb.orderBy('c."createdAt"', 'DESC');
+      }
+
+      const rows = await qb.limit(limit).getMany();
+      return rows.map(r => buildCompactProfile(r));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Получить агрегированную статистику по специализации.
+   */
+  private async getSpecializationStats(
+    specialization: string | null,
+  ): Promise<{ avgExperience: number; totalCount: number; avgScore: number; categoryDistribution: Record<string, number> } | null> {
+    if (!specialization) return null;
+
+    const countResult = await this.candidateRepo
+      .createQueryBuilder('c')
+      .select('COUNT(*)', 'total')
+      .addSelect('AVG(c.totalExperienceYears)', 'avgExp')
+      .addSelect('AVG(c.aiScore)', 'avgScore')
+      .where('c.specialization = :spec', { spec: specialization })
+      .andWhere('c.priority NOT IN (:...hidden)', {
+        hidden: [ResumeCandidatePriority.DELETED, ResumeCandidatePriority.ARCHIVE],
+      })
+      .getRawOne();
+
+    if (!countResult || parseInt(countResult.total) < 2) return null;
+
+    const catRows = await this.candidateRepo
+      .createQueryBuilder('c')
+      .select('c.qualificationCategory', 'cat')
+      .addSelect('COUNT(*)', 'cnt')
+      .where('c.specialization = :spec', { spec: specialization })
+      .andWhere('c.priority NOT IN (:...hidden)', {
+        hidden: [ResumeCandidatePriority.DELETED, ResumeCandidatePriority.ARCHIVE],
+      })
+      .groupBy('c.qualificationCategory')
+      .getRawMany();
+
+    const categoryDistribution: Record<string, number> = {};
+    for (const row of catRows) {
+      categoryDistribution[row.cat] = parseInt(row.cnt);
+    }
+
+    return {
+      avgExperience: parseFloat(countResult.avgExp) || 0,
+      totalCount: parseInt(countResult.total),
+      avgScore: parseFloat(countResult.avgScore) || 0,
+      categoryDistribution,
+    };
+  }
+
+  /**
+   * Вычислить percentile rank — какой % кандидатов той же специализации имеет балл ниже.
+   */
+  private async computePercentileRank(
+    specialization: string | null,
+    score: number,
+  ): Promise<number | null> {
+    if (!specialization) return null;
+
+    const result = await this.scoreRepo
+      .createQueryBuilder('s')
+      .select('COUNT(*)', 'below')
+      .where('s.specialization = :spec', { spec: specialization })
+      .andWhere('s.isCurrent = true')
+      .andWhere('s.totalScore < :score', { score })
+      .getRawOne();
+
+    const totalResult = await this.scoreRepo
+      .createQueryBuilder('s')
+      .select('COUNT(*)', 'total')
+      .where('s.specialization = :spec', { spec: specialization })
+      .andWhere('s.isCurrent = true')
+      .getRawOne();
+
+    const below = parseInt(result?.below) || 0;
+    const total = parseInt(totalResult?.total) || 0;
+
+    if (total < 2) return null;
+    return Math.round((below / total) * 100 * 10) / 10;
+  }
+
+  /**
+   * Получить текущую AI-оценку кандидата.
+   */
+  async getCandidateScore(candidateId: string): Promise<{
+    score: ResumeCandidateScore | null;
+    history: { version: number; totalScore: number; createdAt: Date }[];
+  }> {
+    const score = await this.scoreRepo.findOne({
+      where: { candidateId, isCurrent: true },
+    });
+
+    const history = await this.scoreRepo.find({
+      where: { candidateId },
+      order: { version: 'DESC' },
+      select: ['version', 'totalScore', 'createdAt'],
+    });
+
+    return { score, history };
+  }
+
+  /**
+   * Пересчитать AI-оценку кандидата.
+   */
+  async recalculateScore(candidateId: string): Promise<ResumeCandidateScore> {
+    const candidate = await this.candidateRepo.findOne({
+      where: { id: candidateId },
+    });
+    if (!candidate) throw new NotFoundException('Кандидат не найден');
+
+    return this.scoreCandidateInternal(candidateId);
   }
 }

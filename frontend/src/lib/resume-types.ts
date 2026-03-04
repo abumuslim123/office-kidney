@@ -155,6 +155,40 @@ export interface ResumeCandidate {
   cmeCourses?: ResumeCmeCourse[];
   notes?: ResumeCandidateNote[];
   tags?: ResumeCandidateTag[];
+  aiScore: number | null;
+}
+
+// AI Score types
+export interface ScoreHighlight {
+  type: 'publication' | 'rare_specialty' | 'top_education' | 'unique_experience' | 'certification' | 'language' | 'other';
+  text: string;
+  importance: 'high' | 'medium' | 'low';
+}
+
+export interface ResumeCandidateScore {
+  id: string;
+  createdAt: string;
+  candidateId: string;
+  totalScore: number;
+  aiSummary: string;
+  strengths: string[];
+  weaknesses: string[];
+  highlights: ScoreHighlight[];
+  comparison: string;
+  percentileRank: number | null;
+  specialization: string | null;
+  totalCandidatesInGroup: number;
+  version: number;
+  isCurrent: boolean;
+  modelVersion: string | null;
+  // Sub-scores (гибридная система)
+  experienceScore: number | null;
+  educationScore: number | null;
+  qualificationScore: number | null;
+  developmentScore: number | null;
+  aiQualitativeScore: number | null;
+  deterministicScore: number | null;
+  confidence: number | null;
 }
 
 // Analytics types
@@ -222,6 +256,7 @@ export interface AnalyticsData {
   experienceBuckets: { name: string; count: number }[];
   branchDistribution: BranchDistributionItem[];
   branchCoverage: BranchCoverageRow[];
+  scoreDistribution: { name: string; count: number }[];
   topTags: TagCount[];
   expiringAccreditations: { id: string; fullName: string; specialization: string | null; accreditationExpiryDate: string }[];
 }

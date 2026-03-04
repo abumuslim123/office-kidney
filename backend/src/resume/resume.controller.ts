@@ -153,6 +153,8 @@ export class ResumeController {
     @Query('workCity') workCity?: string,
     @Query('educationCity') educationCity?: string,
     @Query('tag') tag?: string,
+    @Query('scoreMin') scoreMin?: string,
+    @Query('scoreMax') scoreMax?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('sort') sort?: string,
@@ -173,6 +175,8 @@ export class ResumeController {
       workCity,
       educationCity,
       tag,
+      scoreMin: scoreMin ? Number(scoreMin) : undefined,
+      scoreMax: scoreMax ? Number(scoreMax) : undefined,
       page: page ? Number(page) : 1,
       limit: limit ? Math.min(Math.max(Number(limit), 1), 100) : 20,
       sort,
@@ -214,6 +218,32 @@ export class ResumeController {
   @HttpCode(HttpStatus.OK)
   reprocessCandidate(@Param('id') id: string) {
     return this.resumeService.reprocessCandidate(id);
+  }
+
+  @Post('candidates/:id/supplement')
+  @Permissions('hr', 'hr_resume_edit')
+  @HttpCode(HttpStatus.OK)
+  async supplementCandidate(
+    @Param('id') id: string,
+    @Body('text') text: string,
+  ) {
+    if (!text?.trim()) {
+      throw new BadRequestException('Текст не может быть пустым');
+    }
+    await this.resumeService.supplementCandidate(id, text);
+    return { success: true };
+  }
+
+  @Get('candidates/:id/score')
+  getCandidateScore(@Param('id') id: string) {
+    return this.resumeService.getCandidateScore(id);
+  }
+
+  @Post('candidates/:id/score/recalculate')
+  @Permissions('hr', 'hr_resume_edit')
+  @HttpCode(HttpStatus.OK)
+  recalculateScore(@Param('id') id: string) {
+    return this.resumeService.recalculateScore(id);
   }
 
   // ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ import ResumeBranchesCell from '../components/resume/ResumeBranchesCell';
 import ResumeDoctorTypesCell from '../components/resume/ResumeDoctorTypesCell';
 import ResumeNotesSection from '../components/resume/ResumeNotesSection';
 import ResumeTagsManager from '../components/resume/ResumeTagsManager';
+import ResumeScoreCard from '../components/resume/ResumeScoreCard';
 
 export default function ResumeCandidateDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -25,6 +26,8 @@ export default function ResumeCandidateDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showRaw, setShowRaw] = useState(false);
+  const [supplementText, setSupplementText] = useState('');
+  const [supplementing, setSupplementing] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -50,6 +53,20 @@ export default function ResumeCandidateDetailPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const handleSupplement = async () => {
+    if (!id || !supplementText.trim()) return;
+    setSupplementing(true);
+    try {
+      await api.post(`/resume/candidates/${id}/supplement`, { text: supplementText.trim() });
+      setSupplementText('');
+      silentLoad();
+    } catch {
+      /* ignore */
+    } finally {
+      setSupplementing(false);
+    }
+  };
 
   const updateField = async (field: string, value: unknown) => {
     if (!id) return;
@@ -184,6 +201,9 @@ export default function ResumeCandidateDetailPage() {
           </button>
         </div>
       </div>
+
+      {/* AI Score Card */}
+      <ResumeScoreCard candidateId={c.id} candidate={c} onFieldUpdated={silentLoad} />
 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Personal Info */}
@@ -333,6 +353,34 @@ export default function ResumeCandidateDetailPage() {
       {/* Tags */}
       <div className="bg-white border border-gray-200 rounded-xl p-4">
         <ResumeTagsManager candidateId={c.id} tags={c.tags || []} onUpdated={load} />
+      </div>
+
+      {/* Supplement resume */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4">
+        <h3 className="text-sm font-semibold text-gray-900 mb-2">Дополнить резюме</h3>
+        <p className="text-xs text-gray-500 mb-2">
+          Вставьте дополнительную информацию (курсы, сертификаты, места работы и т.д.) — AI перепарсит всё заново.
+        </p>
+        <textarea
+          className="w-full border border-gray-300 rounded-lg p-2.5 text-sm resize-y min-h-[80px] focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 outline-none"
+          placeholder="Например: Курс «УЗИ-диагностика», 2024, РМАНПО, 144 часа, 50 баллов НМО"
+          value={supplementText}
+          onChange={e => setSupplementText(e.target.value)}
+          disabled={supplementing}
+          rows={3}
+        />
+        <div className="flex items-center gap-3 mt-2">
+          <button
+            onClick={handleSupplement}
+            disabled={supplementing || !supplementText.trim()}
+            className="text-sm px-4 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+          >
+            {supplementing ? 'Отправка...' : 'Дополнить и пересчитать'}
+          </button>
+          {supplementing && (
+            <span className="text-xs text-gray-500">Текст добавлен, AI обрабатывает резюме...</span>
+          )}
+        </div>
       </div>
 
       {/* Notes */}

@@ -101,6 +101,112 @@ export const DOCTOR_TYPE_PIE_COLORS: Record<string, string> = {
   FAMILY: '#a3e635',
 };
 
+export const SCORE_COLORS = {
+  high: 'bg-emerald-100 text-emerald-800',
+  medium: 'bg-amber-100 text-amber-800',
+  low: 'bg-red-100 text-red-800',
+} as const;
+
+export function getScoreColor(score: number | null): string {
+  if (score == null) return 'bg-gray-100 text-gray-400';
+  if (score >= 70) return SCORE_COLORS.high;
+  if (score >= 40) return SCORE_COLORS.medium;
+  return SCORE_COLORS.low;
+}
+
+export const HIGHLIGHT_TYPE_ICONS: Record<string, string> = {
+  publication: '📚',
+  rare_specialty: '💎',
+  top_education: '🎓',
+  unique_experience: '⭐',
+  certification: '📜',
+  language: '🌐',
+  other: '✨',
+};
+
+// ─── Confidence fields (зеркалит backend CONFIDENCE_FIELDS) ─────
+
+import type { ResumeCandidate } from './resume-types';
+
+export interface MissingFieldDescriptor {
+  key: string;
+  label: string;
+  hint: string;
+  isFilled: (c: ResumeCandidate) => boolean;
+  actionType: 'editable' | 'section' | 'readonly';
+  fieldName?: string;
+  inputType?: 'number' | 'text' | 'select' | 'boolean';
+  selectOptions?: { value: string; label: string }[];
+}
+
+export const CONFIDENCE_FIELD_DESCRIPTORS: MissingFieldDescriptor[] = [
+  {
+    key: 'totalExperience', label: 'Общий стаж', hint: 'Уточните общий стаж работы (лет)',
+    isFilled: c => c.totalExperienceYears != null,
+    actionType: 'editable', fieldName: 'totalExperienceYears', inputType: 'number',
+  },
+  {
+    key: 'specialtyExperience', label: 'Стаж по специальности', hint: 'Уточните стаж по специальности (лет)',
+    isFilled: c => c.specialtyExperienceYears != null,
+    actionType: 'editable', fieldName: 'specialtyExperienceYears', inputType: 'number',
+  },
+  {
+    key: 'university', label: 'ВУЗ', hint: 'Уточните название ВУЗа',
+    isFilled: c => !!c.university,
+    actionType: 'editable', fieldName: 'university', inputType: 'text',
+  },
+  {
+    key: 'residencyOrInternship', label: 'Ординатура / Интернатура', hint: 'Уточните место ординатуры или интернатуры',
+    isFilled: c => !!c.residencyPlace || !!c.internshipPlace,
+    actionType: 'editable', fieldName: 'residencyPlace', inputType: 'text',
+  },
+  {
+    key: 'qualificationCategory', label: 'Квалификационная категория', hint: 'Уточните квалификационную категорию',
+    isFilled: c => c.qualificationCategory !== 'NONE',
+    actionType: 'editable', fieldName: 'qualificationCategory', inputType: 'select',
+    selectOptions: [
+      { value: 'HIGHEST', label: 'Высшая' },
+      { value: 'FIRST', label: 'Первая' },
+      { value: 'SECOND', label: 'Вторая' },
+    ],
+  },
+  {
+    key: 'accreditation', label: 'Аккредитация', hint: 'Уточните статус аккредитации',
+    isFilled: c => c.accreditationStatus === true,
+    actionType: 'editable', fieldName: 'accreditationStatus', inputType: 'boolean',
+  },
+  {
+    key: 'workHistory', label: 'Трудовая история', hint: 'Запросите подробный список мест работы',
+    isFilled: c => (c.workHistory?.length ?? 0) > 0,
+    actionType: 'section',
+  },
+  {
+    key: 'education', label: 'Детали образования', hint: 'Запросите подробности об образовании',
+    isFilled: c => (c.education?.length ?? 0) > 0,
+    actionType: 'section',
+  },
+  {
+    key: 'nmoPoints', label: 'Баллы НМО', hint: 'Уточните количество баллов НМО',
+    isFilled: c => c.nmoPoints != null,
+    actionType: 'editable', fieldName: 'nmoPoints', inputType: 'number',
+  },
+  {
+    key: 'cmeCourses', label: 'Курсы повышения квалификации', hint: 'Запросите список пройденных курсов',
+    isFilled: c => (c.cmeCourses?.length ?? 0) > 0,
+    actionType: 'section',
+  },
+  {
+    key: 'specialization', label: 'Специализация', hint: 'Уточните основную специализацию',
+    isFilled: c => !!c.specialization,
+    actionType: 'editable', fieldName: 'specialization', inputType: 'text',
+  },
+  {
+    key: 'rawText', label: 'Исходный текст резюме', hint: 'Загрузите файл резюме',
+    isFilled: c => !!c.rawText,
+    actionType: 'readonly',
+  },
+];
+
 export const ACCEPTED_FILE_TYPES: Record<string, string[]> = {
   'application/pdf': ['.pdf'],
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],

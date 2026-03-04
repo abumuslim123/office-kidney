@@ -13,6 +13,7 @@ import {
   formatDateTime,
   formatPhoneForWhatsApp,
   getDaysUntil,
+  getScoreColor,
 } from '../lib/resume-constants';
 import ResumeFiltersBar, { emptyFilters, type ResumeFilters } from '../components/resume/ResumeFiltersBar';
 import ResumeBranchesCell from '../components/resume/ResumeBranchesCell';
@@ -652,6 +653,7 @@ export default function ResumeCandidatesPage() {
       if (max) params.experienceMax = Number(max);
     }
     if (filters.accreditation) params.accreditation = filters.accreditation;
+    if (filters.scoreMin) params.scoreMin = Number(filters.scoreMin);
     return params;
   }, [page, limit, sortBy, sortOrder, filters]);
 
@@ -954,6 +956,15 @@ export default function ResumeCandidatesPage() {
         <StatusSelect candidate={c} onUpdate={updateField} />
       </td>
       <td className="px-3 py-2">
+        {c.aiScore != null ? (
+          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${getScoreColor(c.aiScore)}`}>
+            {Math.round(c.aiScore)}
+          </span>
+        ) : (
+          <span className="text-xs text-gray-300">—</span>
+        )}
+      </td>
+      <td className="px-3 py-2">
         <TagsCell
           c={c}
           tagDropdownId={tagDropdownId}
@@ -978,9 +989,16 @@ export default function ResumeCandidatesPage() {
       className={`cursor-pointer transition-colors ${selectedId === c.id ? 'bg-accent/5 border-l-2 border-l-accent' : 'hover:bg-gray-50/50 border-l-2 border-l-transparent'}`}
       onClick={() => setSelectedId(c.id)}
     >
-      {/* ФИО + специализация */}
+      {/* ФИО + специализация + балл */}
       <td className="px-3 py-2">
-        <div className="font-medium text-gray-900 text-sm leading-tight">{c.fullName || '—'}</div>
+        <div className="flex items-center gap-1.5">
+          <span className="font-medium text-gray-900 text-sm leading-tight">{c.fullName || '—'}</span>
+          {c.aiScore != null && (
+            <span className={`inline-flex items-center px-1.5 py-0 rounded-full text-[10px] font-bold ${getScoreColor(c.aiScore)}`}>
+              {Math.round(c.aiScore)}
+            </span>
+          )}
+        </div>
         <div className="text-xs text-gray-500">{c.specialization || '—'}</div>
       </td>
       {/* Этап (цветной бейдж) */}
@@ -1037,9 +1055,14 @@ export default function ResumeCandidatesPage() {
           </div>
         </div>
 
-        {/* Row 2: Specialization + Branch */}
+        {/* Row 2: Specialization + Branch + Score */}
         <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
           <span className="text-xs text-gray-600">{c.specialization || '—'}</span>
+          {c.aiScore != null && (
+            <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold ${getScoreColor(c.aiScore)}`}>
+              {Math.round(c.aiScore)}
+            </span>
+          )}
           {c.branches.map((b) => (
             <span
               key={b}
@@ -1166,13 +1189,14 @@ export default function ResumeCandidatesPage() {
                     <th className="text-left px-3 py-2 font-medium text-gray-600">Филиал</th>
                     <SortHeader column="qualificationCategory" label="Квалификация" />
                     <SortHeader column="status" label="Этап" />
+                    <SortHeader column="aiScore" label="Балл" />
                     <th className="text-left px-3 py-2 font-medium text-gray-600">Теги</th>
                     <th className="px-3 py-2 w-8" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {groups.map((group) => (
-                    <>{renderTableGroupHeader(group, 8)}{group.items.map((c) => renderTableRow(c))}</>
+                    <>{renderTableGroupHeader(group, 9)}{group.items.map((c) => renderTableRow(c))}</>
                   ))}
                 </tbody>
               </table>

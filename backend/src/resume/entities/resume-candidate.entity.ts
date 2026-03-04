@@ -24,6 +24,7 @@ import { ResumeEducation } from './resume-education.entity';
 import { ResumeCmeCourse } from './resume-cme-course.entity';
 import { ResumeCandidateNote } from './resume-candidate-note.entity';
 import { ResumeCandidateTag } from './resume-candidate-tag.entity';
+import { ResumeCandidateScore } from './resume-candidate-score.entity';
 
 @Entity('resume_candidates')
 @Index(['specialization'])
@@ -206,4 +207,13 @@ export class ResumeCandidate {
 
   @OneToMany(() => ResumeCandidateTag, (tag) => tag.candidate)
   tags: ResumeCandidateTag[];
+
+  @Column({ type: 'float', nullable: true })
+  aiScore: number | null;
+
+  @Column({ type: 'varchar', nullable: true, select: false })
+  embedding: string | null;
+
+  @OneToMany(() => ResumeCandidateScore, (score) => score.candidate)
+  scores: ResumeCandidateScore[];
 }

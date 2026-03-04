@@ -21,6 +21,7 @@ export type ResumeFilters = {
   educationCity: string;
   experience: string;
   accreditation: string;
+  scoreMin: string;
 };
 
 const emptyFilters: ResumeFilters = {
@@ -36,6 +37,7 @@ const emptyFilters: ResumeFilters = {
   educationCity: '',
   experience: '',
   accreditation: '',
+  scoreMin: '',
 };
 
 type FilterOptions = {
@@ -313,6 +315,12 @@ export default function ResumeFiltersBar({
             <option value="expiring">Истекает (&lt;90 дн.)</option>
             <option value="expired">Просрочена</option>
             <option value="none">Нет</option>
+          </select>
+          <select value={filters.scoreMin} onChange={(e) => update({ scoreMin: e.target.value })} className={selectClass}>
+            <option value="">AI-балл</option>
+            <option value="70">70+ (сильные)</option>
+            <option value="40">40+ (средние)</option>
+            <option value="1">Есть оценка</option>
           </select>
         </div>
       )}
