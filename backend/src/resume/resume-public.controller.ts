@@ -1,5 +1,6 @@
 import {
   Controller,
+  Get,
   Post,
   Body,
   UseGuards,
@@ -24,6 +25,15 @@ import {
 @Controller('public/resume/apply')
 export class ResumePublicController {
   constructor(private readonly resumeService: ResumeService) {}
+
+  /**
+   * Публичный список специализаций для формы подачи резюме.
+   */
+  @Get('specializations')
+  async getSpecializations() {
+    const specs = await this.resumeService.getAllSpecializations();
+    return specs.map((s) => s.name);
+  }
 
   /**
    * Public file upload endpoint for the self-service application form.

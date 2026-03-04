@@ -1,19 +1,10 @@
-export const SPECIALIZATIONS = [
-  'Педиатр', 'Неонатолог', 'Детский хирург', 'Детский невролог', 'Детский кардиолог',
-  'Детский эндокринолог', 'Детский гастроэнтеролог', 'Детский офтальмолог',
-  'Детский оториноларинголог (ЛОР)', 'Детский уролог', 'Детский ортопед-травматолог',
-  'Детский аллерголог-иммунолог', 'Детский пульмонолог', 'Детский дерматолог',
-  'Детский инфекционист', 'Детский реаниматолог-анестезиолог', 'Детский психиатр',
-  'Детский ревматолог', 'Детский нефролог', 'Детский гематолог-онколог',
-  'Врач УЗД', 'Рентгенолог', 'Клинический лабораторный диагност', 'Медицинская сестра',
-] as const;
-
 export const QUALIFICATION_CATEGORIES: Record<string, string> = {
   HIGHEST: 'Высшая', FIRST: 'Первая', SECOND: 'Вторая', NONE: 'Без категории',
 };
 
 export const CANDIDATE_STATUSES: Record<string, string> = {
   NEW: 'Новый', REVIEWING: 'На рассмотрении', INVITED: 'Приглашён', HIRED: 'Принят',
+  RESERVE: 'Кадровый резерв', REJECTED: 'Не подходит',
 };
 
 export const CANDIDATE_STATUS_COLORS: Record<string, string> = {
@@ -21,6 +12,8 @@ export const CANDIDATE_STATUS_COLORS: Record<string, string> = {
   REVIEWING: 'bg-blue-100 text-blue-800',
   INVITED: 'bg-purple-100 text-purple-800',
   HIRED: 'bg-emerald-100 text-emerald-800',
+  RESERVE: 'bg-yellow-100 text-yellow-800',
+  REJECTED: 'bg-red-100 text-red-800',
 };
 
 export const CANDIDATE_PRIORITIES: Record<string, string> = {
@@ -70,6 +63,42 @@ export const CATEGORY_COLORS: Record<string, string> = {
   FIRST: 'bg-blue-100 text-blue-800',
   SECOND: 'bg-green-100 text-green-800',
   NONE: 'bg-gray-100 text-gray-800',
+};
+
+export const GENDER_LABELS: Record<string, string> = {
+  MALE: 'Мужчина',
+  FEMALE: 'Женщина',
+  UNKNOWN: 'Не определён',
+};
+
+export const GENDER_COLORS: Record<string, string> = {
+  MALE: 'bg-blue-100 text-blue-800',
+  FEMALE: 'bg-pink-100 text-pink-800',
+  UNKNOWN: 'bg-gray-100 text-gray-500',
+};
+
+export const GENDER_PIE_COLORS: Record<string, string> = {
+  MALE: '#60a5fa',
+  FEMALE: '#f472b6',
+  UNKNOWN: '#9ca3af',
+};
+
+export const DOCTOR_TYPE_LABELS: Record<string, string> = {
+  PEDIATRIC: 'Детский',
+  THERAPIST: 'Взрослый',
+  FAMILY: 'Семейный',
+};
+
+export const DOCTOR_TYPE_COLORS: Record<string, string> = {
+  PEDIATRIC: 'bg-cyan-100 text-cyan-800',
+  THERAPIST: 'bg-orange-100 text-orange-800',
+  FAMILY: 'bg-lime-100 text-lime-800',
+};
+
+export const DOCTOR_TYPE_PIE_COLORS: Record<string, string> = {
+  PEDIATRIC: '#22d3ee',
+  THERAPIST: '#fb923c',
+  FAMILY: '#a3e635',
 };
 
 export const ACCEPTED_FILE_TYPES: Record<string, string[]> = {

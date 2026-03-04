@@ -11,6 +11,8 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import {
+  ResumeCandidateDoctorType,
+  ResumeCandidateGender,
   ResumeCandidatePriority,
   ResumeCandidateStatus,
   ResumeProcessingStatus,
@@ -33,6 +35,7 @@ import { ResumeCandidateTag } from './resume-candidate-tag.entity';
 @Index(['accreditationExpiryDate'])
 @Index(['phone'])
 @Index(['email'])
+@Index(['doctorTypes'])
 export class ResumeCandidate {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -57,6 +60,12 @@ export class ResumeCandidate {
 
   @Column({ type: 'varchar', nullable: true })
   city: string | null;
+
+  @Column({ type: 'varchar', length: 10, default: 'UNKNOWN' })
+  gender: ResumeCandidateGender;
+
+  @Column({ type: 'text', array: true, default: '{}' })
+  doctorTypes: ResumeCandidateDoctorType[];
 
   @Column({ type: 'varchar', nullable: true })
   university: string | null;

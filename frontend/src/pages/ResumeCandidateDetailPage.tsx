@@ -5,16 +5,16 @@ import type { ResumeCandidate } from '../lib/resume-types';
 import {
   CANDIDATE_STATUSES,
   CANDIDATE_STATUS_COLORS,
-  CANDIDATE_PRIORITIES,
-  CANDIDATE_PRIORITY_COLORS,
   QUALIFICATION_CATEGORIES,
   CATEGORY_COLORS,
+  GENDER_LABELS,
   formatDateTime,
   formatPhoneForWhatsApp,
   getDaysUntil,
 } from '../lib/resume-constants';
 import ResumeProcessingStatusBadge from '../components/resume/ResumeProcessingStatus';
 import ResumeBranchesCell from '../components/resume/ResumeBranchesCell';
+import ResumeDoctorTypesCell from '../components/resume/ResumeDoctorTypesCell';
 import ResumeNotesSection from '../components/resume/ResumeNotesSection';
 import ResumeTagsManager from '../components/resume/ResumeTagsManager';
 
@@ -37,6 +37,14 @@ export default function ResumeCandidateDetailPage() {
     } finally {
       setLoading(false);
     }
+  }, [id]);
+
+  const silentLoad = useCallback(async () => {
+    if (!id) return;
+    try {
+      const res = await api.get<ResumeCandidate>(`/resume/candidates/${id}`);
+      setCandidate(res.data);
+    } catch { /* ignore */ }
   }, [id]);
 
   useEffect(() => {
@@ -102,9 +110,12 @@ export default function ResumeCandidateDetailPage() {
           <div className="flex items-center gap-3 mt-1 flex-wrap">
             {c.specialization && <span className="text-sm text-gray-600">{c.specialization}</span>}
             <ResumeProcessingStatusBadge status={c.processingStatus} />
-            {c.aiConfidence != null && (
-              <span className="text-xs text-gray-400" title="Уверенность AI">
-                AI: {Math.round(c.aiConfidence * 100)}%
+            {c.aiConfidence != null && c.aiConfidence < 0.6 && (
+              <span
+                className="text-xs text-amber-600 cursor-help"
+                title="Парсинг мог сработать некорректно. Попробуйте пересчитать."
+              >
+                ⚠ Низкое качество парсинга
               </span>
             )}
           </div>
@@ -130,7 +141,7 @@ export default function ResumeCandidateDetailPage() {
       {/* Status row */}
       <div className="flex items-center gap-4 flex-wrap">
         <div>
-          <span className="text-xs text-gray-400 block mb-1">Статус</span>
+          <span className="text-xs text-gray-400 block mb-1">Этап</span>
           <select
             value={c.status}
             onChange={(e) => updateField('status', e.target.value)}
@@ -142,20 +153,35 @@ export default function ResumeCandidateDetailPage() {
           </select>
         </div>
         <div>
-          <span className="text-xs text-gray-400 block mb-1">Приоритет</span>
-          <select
-            value={c.priority}
-            onChange={(e) => updateField('priority', e.target.value)}
-            className={`text-sm font-medium rounded-lg px-3 py-1.5 border-0 cursor-pointer ${CANDIDATE_PRIORITY_COLORS[c.priority] || ''}`}
-          >
-            {Object.entries(CANDIDATE_PRIORITIES).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
-          </select>
+          <span className="text-xs text-gray-400 block mb-1">Направление</span>
+          <ResumeDoctorTypesCell candidateId={c.id} doctorTypes={c.doctorTypes || []} onUpdated={silentLoad} />
         </div>
         <div>
           <span className="text-xs text-gray-400 block mb-1">Филиалы</span>
-          <ResumeBranchesCell candidateId={c.id} branches={c.branches} onUpdated={load} />
+          <ResumeBranchesCell candidateId={c.id} branches={c.branches} onUpdated={silentLoad} />
+        </div>
+        <div className="ml-auto flex gap-2">
+          <button
+            type="button"
+            onClick={async () => {
+              await api.patch(`/resume/candidates/${c.id}`, { priority: 'ARCHIVE' });
+              navigate('/hr/resume/archive');
+            }}
+            className="px-3 py-1.5 text-xs text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            В архив
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              if (!confirm('Удалить кандидата?')) return;
+              await api.patch(`/resume/candidates/${c.id}`, { priority: 'DELETED' });
+              navigate('/hr/resume/trash');
+            }}
+            className="px-3 py-1.5 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+          >
+            Удалить
+          </button>
         </div>
       </div>
 
@@ -181,6 +207,7 @@ export default function ResumeCandidateDetailPage() {
           </Field>
           <Field label="Дата рождения" value={formatDateTime(c.birthDate)} />
           <Field label="Город" value={c.city} />
+          <Field label="Пол" value={GENDER_LABELS[c.gender] || '—'} />
         </Section>
 
         {/* Education */}

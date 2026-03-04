@@ -38,9 +38,13 @@ import {
   ResumeQualificationCategory,
   ResumeCandidateStatus,
   ResumeCandidatePriority,
+  ResumeCandidateGender,
+  ResumeCandidateDoctorType,
 } from './entities/resume.enums';
+import { ResumeSpecialization } from './entities/resume-specialization.entity';
 import { ResumeDuplicateDetectionService, type DuplicateCheckResult } from './resume-duplicate-detection.service';
-import { parseCvText } from './ai/parse-cv';
+import { parseCvText, evaluateParsingQuality } from './ai/parse-cv';
+import { buildCvParsingPrompt } from './ai/prompts';
 import type { CvParsedOutput } from './ai/schemas';
 
 import { CreateNoteDto } from './dto/create-note.dto';
@@ -51,32 +55,11 @@ import { TelegramIngestDto } from './dto/telegram-ingest.dto';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const SPECIALIZATIONS = [
-  'Педиатр',
-  'Неонатолог',
-  'Детский хирург',
-  'Детский невролог',
-  'Детский кардиолог',
-  'Детский эндокринолог',
-  'Детский гастроэнтеролог',
-  'Детский офтальмолог',
-  'Детский оториноларинголог (ЛОР)',
-  'Детский уролог',
-  'Детский ортопед-травматолог',
-  'Детский аллерголог-иммунолог',
-  'Детский пульмонолог',
-  'Детский дерматолог',
-  'Детский инфекционист',
-  'Детский реаниматолог-анестезиолог',
-  'Детский психиатр',
-  'Детский ревматолог',
-  'Детский нефролог',
-  'Детский гематолог-онколог',
-  'Врач УЗД',
-  'Рентгенолог',
-  'Клинический лабораторный диагност',
-  'Медицинская сестра',
-] as const;
+const DOCTOR_TYPE_LABELS: Record<string, string> = {
+  PEDIATRIC: 'Детский',
+  THERAPIST: 'Взрослый',
+  FAMILY: 'Семейный',
+};
 
 const BRANCHES = ['Каспийск', 'Махачкала', 'Хасавюрт'] as const;
 
@@ -92,6 +75,8 @@ const CANDIDATE_STATUSES: Record<string, string> = {
   REVIEWING: 'На рассмотрении',
   INVITED: 'Приглашён',
   HIRED: 'Принят',
+  RESERVE: 'Кадровый резерв',
+  REJECTED: 'Не подходит',
 };
 
 const CANDIDATE_PRIORITIES: Record<string, string> = {
@@ -117,33 +102,26 @@ const MONTH_NAMES = [
 // ─── Helper functions ─────────────────────────────────────────────────────────
 
 /**
- * Normalize specialization to canonical form from SPECIALIZATIONS list.
- * "врач педиатр" / "Врач-педиатр" -> "Педиатр", etc.
+ * Удаляет типичные префиксы из названия специализации.
  */
-function normalizeSpecialization(raw: string | null): string | null {
-  if (!raw) return null;
+function stripSpecializationPrefixes(raw: string): string {
+  const prefixes = [
+    /^детский\s+врач[\s\-]*/i,
+    /^врач[\s\-]+/i,
+    /^доктор[\s\-]+/i,
+    /^детская\s+/i,
+    /^детский\s+/i,
+  ];
 
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-
-  // Exact match (case insensitive)
-  const exact = SPECIALIZATIONS.find(
-    (s) => s.toLowerCase() === trimmed.toLowerCase(),
-  );
-  if (exact) return exact;
-
-  // Remove "врач" / "врач-" prefix and try again
-  const withoutPrefix = trimmed.replace(/^врач[\s\-]+/i, '').trim();
-
-  if (withoutPrefix) {
-    const match = SPECIALIZATIONS.find(
-      (s) => s.toLowerCase() === withoutPrefix.toLowerCase(),
-    );
-    if (match) return match;
+  let cleaned = raw;
+  for (const prefix of prefixes) {
+    const attempt = cleaned.replace(prefix, '').trim();
+    if (attempt) {
+      cleaned = attempt;
+      break;
+    }
   }
-
-  // If nothing matched, return as-is
-  return trimmed;
+  return cleaned;
 }
 
 /**
@@ -228,6 +206,8 @@ export interface AnalyticsData {
   funnel: FunnelStage[];
   specializations: { name: string; count: number }[];
   categories: CategoryItem[];
+  genderDistribution: CategoryItem[];
+  doctorTypeDistribution: CategoryItem[];
   experienceBuckets: { name: string; count: number }[];
   branchDistribution: BranchDistributionItem[];
   branchCoverage: BranchCoverageRow[];
@@ -247,6 +227,7 @@ export interface CandidateListFilters {
   specialization?: string;
   qualificationCategory?: string;
   branch?: string;
+  doctorType?: string;
   processingStatus?: string;
   experienceMin?: number;
   experienceMax?: number;
@@ -299,10 +280,101 @@ export class ResumeService {
     private tagRepo: Repository<ResumeCandidateTag>,
     @InjectRepository(ResumeTelegramChat)
     private telegramChatRepo: Repository<ResumeTelegramChat>,
+    @InjectRepository(ResumeSpecialization)
+    private specializationRepo: Repository<ResumeSpecialization>,
     private config: ConfigService,
     private duplicateService: ResumeDuplicateDetectionService,
     private dataSource: DataSource,
   ) {}
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  Specialization helpers
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Получить все специализации из справочной таблицы.
+   */
+  async getAllSpecializations(): Promise<ResumeSpecialization[]> {
+    return this.specializationRepo.find({ order: { name: 'ASC' } });
+  }
+
+  /**
+   * Нормализация специализации по справочной таблице:
+   * 1. Удаление префиксов (врач, доктор, детский)
+   * 2. Exact match по name (case-insensitive)
+   * 3. Match по aliases (case-insensitive)
+   * 4. Substring match
+   * 5. Если ничего не нашлось — создать новую запись
+   */
+  async normalizeSpecialization(
+    raw: string | null,
+    specializations: ResumeSpecialization[],
+  ): Promise<string | null> {
+    if (!raw) return null;
+
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+
+    const cleaned = stripSpecializationPrefixes(trimmed);
+    const lowerCleaned = cleaned.toLowerCase();
+    const lowerTrimmed = trimmed.toLowerCase();
+
+    // 1. Exact match по name
+    const exactName = specializations.find(
+      (s) =>
+        s.name.toLowerCase() === lowerTrimmed ||
+        s.name.toLowerCase() === lowerCleaned,
+    );
+    if (exactName) return exactName.name;
+
+    // 2. Match по aliases
+    const aliasMatch = specializations.find((s) =>
+      s.aliases.some(
+        (a) =>
+          a.toLowerCase() === lowerTrimmed ||
+          a.toLowerCase() === lowerCleaned,
+      ),
+    );
+    if (aliasMatch) return aliasMatch.name;
+
+    // 3. Substring match: name содержит cleaned или наоборот
+    const substringMatch = specializations.find((s) => {
+      const lowerName = s.name.toLowerCase();
+      return (
+        lowerName.includes(lowerCleaned) || lowerCleaned.includes(lowerName)
+      );
+    });
+    if (substringMatch) return substringMatch.name;
+
+    // 4. Substring match по aliases
+    const aliasSubstring = specializations.find((s) =>
+      s.aliases.some((a) => {
+        const la = a.toLowerCase();
+        return la.includes(lowerCleaned) || lowerCleaned.includes(la);
+      }),
+    );
+    if (aliasSubstring) return aliasSubstring.name;
+
+    // 5. Ничего не нашли — создать новую запись
+    const canonicalName =
+      cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+
+    try {
+      const newSpec = this.specializationRepo.create({
+        name: canonicalName,
+        aliases: [lowerCleaned],
+      });
+      await this.specializationRepo.save(newSpec);
+      this.logger.log(`Создана новая специализация: "${canonicalName}"`);
+    } catch {
+      // UNIQUE constraint — кто-то уже создал
+      this.logger.warn(
+        `Специализация "${canonicalName}" уже существует в БД`,
+      );
+    }
+
+    return canonicalName;
+  }
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  File Upload
@@ -490,7 +562,9 @@ export class ResumeService {
         processingStatus: ResumeProcessingStatus.PARSING,
       });
 
-      const parsed = await parseCvText(rawText);
+      const specs = await this.getAllSpecializations();
+      const systemPrompt = buildCvParsingPrompt(specs.map((s) => s.name));
+      const parsed = await parseCvText(rawText, systemPrompt);
 
       // Step 3: Save structured data
       await this.saveParsedData(candidateId, parsed);
@@ -499,10 +573,21 @@ export class ResumeService {
       const dupResult =
         await this.duplicateService.checkAndHandleDuplicates(candidateId);
 
+      // Step 5: Independent quality evaluation
+      let aiConfidence = 0.5;
+      try {
+        const evaluation = await evaluateParsingQuality(rawText, parsed);
+        aiConfidence = evaluation.score;
+      } catch (evalError) {
+        this.logger.warn(
+          `Quality evaluation failed for ${candidateId}: ${evalError instanceof Error ? evalError.message : 'unknown'}`,
+        );
+      }
+
       if (dupResult.status === 'exact_duplicate_deleted') {
         await this.candidateRepo.update(candidateId, {
           processingStatus: ResumeProcessingStatus.COMPLETED,
-          aiConfidence: parsed.confidence,
+          aiConfidence,
         });
         this.logger.log(
           `Candidate ${candidateId} deleted as exact duplicate of ${dupResult.existingCandidateId}`,
@@ -512,7 +597,7 @@ export class ResumeService {
 
       await this.candidateRepo.update(candidateId, {
         processingStatus: ResumeProcessingStatus.COMPLETED,
-        aiConfidence: parsed.confidence,
+        aiConfidence,
       });
     } catch (error) {
       const message =
@@ -536,6 +621,18 @@ export class ResumeService {
     candidateId: string,
     data: Awaited<ReturnType<typeof parseCvText>>,
   ): Promise<void> {
+    const specs = await this.getAllSpecializations();
+
+    const normalizedSpec = await this.normalizeSpecialization(
+      data.specialization,
+      specs,
+    );
+    const normalizedAdditional = await Promise.all(
+      data.additionalSpecializations.map(async (s) =>
+        (await this.normalizeSpecialization(s, specs)) ?? s,
+      ),
+    );
+
     await this.dataSource.transaction(async (manager) => {
       // Update the candidate entity with all parsed fields
       await manager.update(ResumeCandidate, candidateId, {
@@ -544,6 +641,9 @@ export class ResumeService {
         phone: data.phone,
         birthDate: parseDate(data.birthDate),
         city: data.city,
+        gender:
+          (data.gender as ResumeCandidateGender) ||
+          ResumeCandidateGender.UNKNOWN,
         university: data.university,
         faculty: data.faculty,
         graduationYear: data.graduationYear,
@@ -553,10 +653,8 @@ export class ResumeService {
         residencyPlace: data.residencyPlace,
         residencySpecialty: data.residencySpecialty,
         residencyYearEnd: data.residencyYearEnd,
-        specialization: normalizeSpecialization(data.specialization),
-        additionalSpecializations: data.additionalSpecializations.map(
-          (s) => normalizeSpecialization(s) ?? s,
-        ),
+        specialization: normalizedSpec,
+        additionalSpecializations: normalizedAdditional,
         qualificationCategory:
           (data.qualificationCategory as ResumeQualificationCategory) ||
           ResumeQualificationCategory.NONE,
@@ -766,6 +864,12 @@ export class ResumeService {
       qb.andWhere(':branch = ANY(c.branches)', { branch: filters.branch });
     }
 
+    if (filters.doctorType) {
+      qb.andWhere(':doctorType = ANY(c.doctorTypes)', {
+        doctorType: filters.doctorType,
+      });
+    }
+
     if (filters.processingStatus) {
       qb.andWhere('c.processingStatus = :processingStatus', {
         processingStatus: filters.processingStatus,
@@ -938,6 +1042,8 @@ export class ResumeService {
     if (dto.branches !== undefined) updateData.branches = dto.branches;
     if (dto.status !== undefined) updateData.status = dto.status;
     if (dto.priority !== undefined) updateData.priority = dto.priority;
+    if (dto.gender !== undefined) updateData.gender = dto.gender;
+    if (dto.doctorTypes !== undefined) updateData.doctorTypes = dto.doctorTypes;
 
     await this.candidateRepo.update(id, updateData);
 
@@ -1234,11 +1340,22 @@ export class ResumeService {
         .getRawMany<{ city: string }>(),
     ]);
 
+    // Мержим канонические специализации из справочника + фактические из кандидатов
+    const canonicalSpecs = await this.specializationRepo.find({
+      select: ['name'],
+      order: { name: 'ASC' },
+    });
+
+    const allSpecializations = [
+      ...new Set([
+        ...canonicalSpecs.map((s) => s.name),
+        ...specializationsRaw.map((r) => r.specialization).filter(Boolean),
+      ]),
+    ].sort();
+
     return {
       cities: citiesRaw.map((r) => r.city).filter(Boolean),
-      specializations: specializationsRaw
-        .map((r) => r.specialization)
-        .filter(Boolean),
+      specializations: allSpecializations,
       branches: [...BRANCHES],
       workCities: workCitiesRaw.map((r) => r.city).filter(Boolean),
       educationCities: educationCitiesRaw.map((r) => r.city).filter(Boolean),
@@ -1269,6 +1386,7 @@ export class ResumeService {
       { header: 'Дата рождения', key: 'birthDate', width: 14 },
       { header: 'Город', key: 'city', width: 16 },
       { header: 'Специализация', key: 'specialization', width: 30 },
+      { header: 'Направление', key: 'doctorType', width: 20 },
       { header: 'Доп. специализации', key: 'additionalSpecializations', width: 30 },
       { header: 'Категория', key: 'qualificationCategory', width: 16 },
       { header: 'ВУЗ', key: 'university', width: 30 },
@@ -1324,6 +1442,7 @@ export class ResumeService {
         birthDate: formatDateRu(c.birthDate),
         city: c.city || '',
         specialization: c.specialization || '',
+        doctorType: (c.doctorTypes || []).map(t => DOCTOR_TYPE_LABELS[t] || t).join(', '),
         additionalSpecializations: (c.additionalSpecializations || []).join(', '),
         qualificationCategory:
           QUALIFICATION_CATEGORIES[c.qualificationCategory] ||
@@ -1437,6 +1556,12 @@ export class ResumeService {
       qb.andWhere(':branch = ANY(c.branches)', { branch: filters.branch });
     }
 
+    if (filters.doctorType) {
+      qb.andWhere(':doctorType = ANY(c.doctorTypes)', {
+        doctorType: filters.doctorType,
+      });
+    }
+
     if (filters.processingStatus) {
       qb.andWhere('c.processingStatus = :processingStatus', {
         processingStatus: filters.processingStatus,
@@ -1548,6 +1673,7 @@ export class ResumeService {
   async getFullAnalytics(
     filters: { period?: string; branch?: string } = {},
   ): Promise<AnalyticsData> {
+    const allSpecs = await this.getAllSpecializations();
     const now = new Date();
     const period = (filters.period as PeriodPreset) || 'all';
     const branch = filters.branch || null;
@@ -1742,6 +1868,8 @@ export class ResumeService {
           'c.specialization',
           'c.qualificationCategory',
           'c.totalExperienceYears',
+          'c.gender',
+          'c.doctorTypes',
         ])
         .getMany(),
 
@@ -1911,7 +2039,7 @@ export class ResumeService {
         value: specCoverageCurrent,
         previousValue: specCoveragePrevious,
         format: 'fraction',
-        fractionTotal: SPECIALIZATIONS.length,
+        fractionTotal: allSpecs.length,
         icon: 'Activity',
         color: 'text-teal-600',
         trendDirection: 'up-good',
@@ -2012,6 +2140,57 @@ export class ResumeService {
       })
       .filter((c) => c.count > 0);
 
+    // ── Gender distribution ────────────────────────────────────
+
+    const genderRaw = [
+      { name: 'Мужчины', key: 'MALE' },
+      { name: 'Женщины', key: 'FEMALE' },
+      { name: 'Не определён', key: 'UNKNOWN' },
+    ];
+    const genderDistribution: CategoryItem[] = genderRaw
+      .map(({ name, key }) => {
+        const count = allCompletedCandidates.filter(
+          (c) => c.gender === key,
+        ).length;
+        return {
+          name,
+          key,
+          count,
+          percentage:
+            totalCompleted > 0
+              ? Math.round((count / totalCompleted) * 100)
+              : 0,
+        };
+      })
+      .filter((c) => c.count > 0);
+
+    // ── Doctor type distribution ────────────────────────────────
+
+    const doctorTypeRaw = [
+      { name: 'Детский', key: 'PEDIATRIC' },
+      { name: 'Взрослый', key: 'THERAPIST' },
+      { name: 'Семейный', key: 'FAMILY' },
+      { name: 'Не указано', key: 'UNKNOWN' },
+    ];
+    const doctorTypeDistribution: CategoryItem[] = doctorTypeRaw
+      .map(({ name, key }) => {
+        const count =
+          key === 'UNKNOWN'
+            ? allCompletedCandidates.filter((c) => !c.doctorTypes || c.doctorTypes.length === 0).length
+            : allCompletedCandidates.filter((c) => (c.doctorTypes || []).includes(key as any))
+                .length;
+        return {
+          name,
+          key,
+          count,
+          percentage:
+            totalCompleted > 0
+              ? Math.round((count / totalCompleted) * 100)
+              : 0,
+        };
+      })
+      .filter((c) => c.count > 0);
+
     // ── Experience buckets ───────────────────────────────────────
 
     const expBuckets = [
@@ -2063,10 +2242,10 @@ export class ResumeService {
     // ── Branch coverage matrix ───────────────────────────────────
 
     const matrix = new Map<string, Record<string, number>>();
-    SPECIALIZATIONS.forEach((spec) => {
+    allSpecs.forEach((spec) => {
       const row: Record<string, number> = {};
       BRANCHES.forEach((b) => (row[b] = 0));
-      matrix.set(spec, row);
+      matrix.set(spec.name, row);
     });
 
     coverageCandidates.forEach((c) => {
@@ -2134,6 +2313,8 @@ export class ResumeService {
       funnel,
       specializations,
       categories,
+      genderDistribution,
+      doctorTypeDistribution,
       experienceBuckets,
       branchDistribution,
       branchCoverage,
@@ -2163,6 +2344,12 @@ export class ResumeService {
       return { id: 'ok' } as ResumeCandidate;
     }
 
+    const specs = await this.getAllSpecializations();
+    const normalizedSpec = await this.normalizeSpecialization(
+      dto.specialization || null,
+      specs,
+    );
+
     const candidate = await this.dataSource.transaction(async (manager) => {
       const candidateEntity = manager.create(ResumeCandidate, {
         fullName: dto.fullName,
@@ -2170,7 +2357,7 @@ export class ResumeService {
         phone: dto.phone || null,
         city: dto.city || null,
         branches: dto.branches || [],
-        specialization: normalizeSpecialization(dto.specialization || null),
+        specialization: normalizedSpec,
         rawText: dto.rawText || null,
         uploadedFileId: dto.uploadedFileId || null,
         status: ResumeCandidateStatus.NEW,
@@ -2619,7 +2806,9 @@ export class ResumeService {
     candidateId: string,
     rawText: string,
   ): Promise<CvParsedOutput> {
-    const parsed = await parseCvText(rawText);
+    const specs = await this.getAllSpecializations();
+    const systemPrompt = buildCvParsingPrompt(specs.map((s) => s.name));
+    const parsed = await parseCvText(rawText, systemPrompt);
     await this.saveParsedData(candidateId, parsed);
     return parsed;
   }

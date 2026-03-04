@@ -7,7 +7,7 @@ import {
 } from 'recharts';
 import { api } from '../lib/api';
 import type { AnalyticsData } from '../lib/resume-types';
-import { BRANCHES, formatDateTime } from '../lib/resume-constants';
+import { BRANCHES, GENDER_PIE_COLORS, DOCTOR_TYPE_PIE_COLORS, formatDateTime } from '../lib/resume-constants';
 
 const COLORS = ['#2563eb', '#7c3aed', '#059669', '#d97706', '#dc2626', '#0891b2', '#4f46e5', '#be185d'];
 const PERIODS = [
@@ -188,6 +188,54 @@ export default function ResumeAnalyticsPage() {
                   ))}
                 </Pie>
                 <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        )}
+
+        {/* Gender distribution */}
+        {data.genderDistribution && data.genderDistribution.length > 0 && (
+          <ChartCard title="Распределение по полу">
+            <ResponsiveContainer width="100%" height={250}>
+              <PieChart>
+                <Pie
+                  data={data.genderDistribution}
+                  dataKey="count"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={90}
+                  label={(props: any) => `${props.name} (${Math.round(props.percent * 100)}%)`}
+                >
+                  {data.genderDistribution.map((entry) => (
+                    <Cell key={entry.key} fill={GENDER_PIE_COLORS[entry.key] || '#9ca3af'} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(value: number) => [value, 'Кандидатов']} />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        )}
+
+        {/* Doctor type distribution */}
+        {data.doctorTypeDistribution && data.doctorTypeDistribution.length > 0 && (
+          <ChartCard title="Направление врача">
+            <ResponsiveContainer width="100%" height={250}>
+              <PieChart>
+                <Pie
+                  data={data.doctorTypeDistribution}
+                  dataKey="count"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={90}
+                  label={(props: any) => `${props.name} (${Math.round(props.percent * 100)}%)`}
+                >
+                  {data.doctorTypeDistribution.map((entry) => (
+                    <Cell key={entry.key} fill={DOCTOR_TYPE_PIE_COLORS[entry.key] || '#9ca3af'} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(value: any) => [value, 'Кандидатов']} />
               </PieChart>
             </ResponsiveContainer>
           </ChartCard>

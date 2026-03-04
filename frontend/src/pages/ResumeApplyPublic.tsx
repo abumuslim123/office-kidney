@@ -4,7 +4,7 @@ import { useForm, useFieldArray, FormProvider } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { publicApi } from '../lib/api';
-import { SPECIALIZATIONS, BRANCHES, QUALIFICATION_CATEGORIES } from '../lib/resume-constants';
+import { BRANCHES, QUALIFICATION_CATEGORIES } from '../lib/resume-constants';
 
 /* ─── Schemas ─── */
 
@@ -121,6 +121,13 @@ export default function ResumeApplyPublic() {
   const [uploadedFileId, setUploadedFileId] = useState<string | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [specializations, setSpecializations] = useState<string[]>([]);
+
+  useEffect(() => {
+    publicApi.get<string[]>('/public/resume/apply/specializations')
+      .then((r) => setSpecializations(r.data))
+      .catch(() => {});
+  }, []);
 
   // Load draft from localStorage
   const loadDraft = useCallback((): Partial<ApplyFormData> | undefined => {
@@ -368,7 +375,7 @@ export default function ResumeApplyPublic() {
               {step === 1 && <EducationStepInner />}
 
               {/* Step 2: Specialization */}
-              {step === 2 && <SpecializationStepInner />}
+              {step === 2 && <SpecializationStepInner specializations={specializations} />}
 
               {/* Step 3: Work experience */}
               {step === 3 && <WorkExperienceStepInner />}
@@ -545,7 +552,7 @@ function EducationStepInner() {
   );
 }
 
-function SpecializationStepInner() {
+function SpecializationStepInner({ specializations }: { specializations: string[] }) {
   const { register, watch, setValue } = useFormContextTyped();
   const accreditationStatus = watch('accreditationStatus');
   const addSpecs = watch('additionalSpecializations') || [];
@@ -560,7 +567,7 @@ function SpecializationStepInner() {
         <label className={labelClass}>Основная специализация</label>
         <select {...register('specialization')} className={inputClass}>
           <option value="">Выберите...</option>
-          {SPECIALIZATIONS.map((s) => (
+          {specializations.map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
         </select>

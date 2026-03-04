@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../../lib/api';
 import {
-  SPECIALIZATIONS,
   BRANCHES,
   CANDIDATE_STATUSES,
-  CANDIDATE_PRIORITIES,
   QUALIFICATION_CATEGORIES,
   EXPERIENCE_RANGES,
+  DOCTOR_TYPE_LABELS,
 } from '../../lib/resume-constants';
 
 export type ResumeFilters = {
@@ -15,6 +14,7 @@ export type ResumeFilters = {
   branch: string;
   status: string;
   priority: string;
+  doctorType: string;
   category: string;
   city: string;
   workCity: string;
@@ -29,6 +29,7 @@ const emptyFilters: ResumeFilters = {
   branch: '',
   status: '',
   priority: '',
+  doctorType: '',
   category: '',
   city: '',
   workCity: '',
@@ -160,7 +161,7 @@ export default function ResumeFiltersBar({
   };
 
   useEffect(() => {
-    api.get<FilterOptions>('/resume/filter-options').then((r) => setOptions(r.data)).catch(() => {});
+    api.get<FilterOptions>('/resume/candidates/filter-options').then((r) => setOptions(r.data)).catch(() => {});
   }, []);
 
   const update = useCallback(
@@ -168,12 +169,11 @@ export default function ResumeFiltersBar({
     [filters, onChange],
   );
 
-  // Merge hardcoded + dynamic specializations, deduplicate
-  const allSpecializations = [...new Set([...SPECIALIZATIONS, ...options.specializations])].sort();
+  const allSpecializations = [...new Set(options.specializations)].sort();
 
   const extraCount = [
+    filters.doctorType,
     filters.category,
-    filters.priority,
     filters.city,
     filters.workCity,
     filters.educationCity,
@@ -207,6 +207,12 @@ export default function ResumeFiltersBar({
           <option value="">Филиал</option>
           {BRANCHES.map((b) => (
             <option key={b} value={b}>{b}</option>
+          ))}
+        </select>
+        <select value={filters.doctorType} onChange={(e) => update({ doctorType: e.target.value })} className={selectClass}>
+          <option value="">Направление</option>
+          {Object.entries(DOCTOR_TYPE_LABELS).map(([k, v]) => (
+            <option key={k} value={k}>{v}</option>
           ))}
         </select>
         <select value={filters.status} onChange={(e) => update({ status: e.target.value })} className={selectClass}>
@@ -271,12 +277,6 @@ export default function ResumeFiltersBar({
 
       {showExtra && (
         <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100">
-          <select value={filters.priority} onChange={(e) => update({ priority: e.target.value })} className={selectClass}>
-            <option value="">Приоритет</option>
-            {Object.entries(CANDIDATE_PRIORITIES).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
-          </select>
           <select value={filters.category} onChange={(e) => update({ category: e.target.value })} className={selectClass}>
             <option value="">Категория</option>
             {Object.entries(QUALIFICATION_CATEGORIES).map(([k, v]) => (

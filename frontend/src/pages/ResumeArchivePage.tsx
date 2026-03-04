@@ -127,9 +127,7 @@ export default function ResumeArchivePage() {
                   <th className="text-left px-3 py-2 font-medium text-gray-600">ФИО</th>
                   <th className="text-left px-3 py-2 font-medium text-gray-600">Специализация</th>
                   <th className="text-left px-3 py-2 font-medium text-gray-600">Филиал</th>
-                  <th className="text-left px-3 py-2 font-medium text-gray-600">Категория</th>
-                  <th className="text-left px-3 py-2 font-medium text-gray-600">Стаж</th>
-                  <th className="text-left px-3 py-2 font-medium text-gray-600">Аккредитация</th>
+                  <th className="text-left px-3 py-2 font-medium text-gray-600">Квалификация</th>
                   <th className="text-left px-3 py-2 font-medium text-gray-600">Теги</th>
                   <th className="text-left px-3 py-2 font-medium text-gray-600">Контакты</th>
                   <th className="px-3 py-2" />
@@ -148,42 +146,36 @@ export default function ResumeArchivePage() {
                         <div className="text-xs text-gray-400">{formatDateTime(c.createdAt)}</div>
                       </td>
                       {/* Специализация */}
-                      <td className="px-3 py-2 text-gray-600 max-w-[160px] truncate">{c.specialization || '—'}</td>
+                      <td className="px-3 py-2 text-gray-600">{c.specialization || '—'}</td>
                       {/* Филиал */}
                       <td className="px-3 py-2">
                         <ResumeBranchesCell candidateId={c.id} branches={c.branches} onUpdated={silentReload} />
                       </td>
-                      {/* Категория */}
+                      {/* Квалификация = Категория + Стаж + Аккредитация */}
                       <td className="px-3 py-2">
-                        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${CATEGORY_COLORS[c.qualificationCategory] || ''}`}>
-                          {QUALIFICATION_CATEGORIES[c.qualificationCategory] || '—'}
-                        </span>
-                      </td>
-                      {/* Стаж */}
-                      <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
-                        {c.totalExperienceYears != null ? `${c.totalExperienceYears} лет` : '—'}
-                      </td>
-                      {/* Аккредитация */}
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        {c.accreditationStatus ? (
-                          <span
-                            className={`text-xs font-medium ${
-                              accDays !== null && accDays < 0
-                                ? 'text-red-600'
-                                : accDays !== null && accDays < 90
-                                  ? 'text-amber-600'
-                                  : 'text-green-600'
-                            }`}
-                          >
-                            {c.accreditationExpiryDate
-                              ? new Date(c.accreditationExpiryDate).toLocaleDateString('ru-RU')
-                              : 'Есть'}
-                            {accDays !== null && accDays < 0 && (
-                              <span className="ml-1 text-red-500">Истекла</span>
-                            )}
+                        <div className="flex items-center gap-1.5">
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${CATEGORY_COLORS[c.qualificationCategory] || ''}`}>
+                            {QUALIFICATION_CATEGORIES[c.qualificationCategory] || '—'}
                           </span>
+                          {c.totalExperienceYears != null && (
+                            <span className="text-xs text-gray-500">{c.totalExperienceYears} л.</span>
+                          )}
+                        </div>
+                        {c.accreditationStatus ? (
+                          <div className={`text-xs mt-0.5 ${
+                            accDays !== null && accDays < 0
+                              ? 'text-red-600'
+                              : accDays !== null && accDays < 90
+                                ? 'text-amber-600'
+                                : 'text-green-600'
+                          }`}>
+                            {c.accreditationExpiryDate
+                              ? `Аккр. до ${new Date(c.accreditationExpiryDate).toLocaleDateString('ru-RU')}`
+                              : 'Аккр. есть'}
+                            {accDays !== null && accDays < 0 && ' (истекла)'}
+                          </div>
                         ) : (
-                          <span className="text-xs text-gray-400">Нет</span>
+                          <div className="text-xs text-gray-400 mt-0.5">Нет аккр.</div>
                         )}
                       </td>
                       {/* Теги */}

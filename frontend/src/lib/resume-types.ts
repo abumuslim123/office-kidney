@@ -18,6 +18,8 @@ export enum ResumeCandidateStatus {
   REVIEWING = 'REVIEWING',
   INVITED = 'INVITED',
   HIRED = 'HIRED',
+  RESERVE = 'RESERVE',
+  REJECTED = 'REJECTED',
 }
 
 export enum ResumeCandidatePriority {
@@ -26,6 +28,18 @@ export enum ResumeCandidatePriority {
   NOT_SUITABLE = 'NOT_SUITABLE',
   ARCHIVE = 'ARCHIVE',
   DELETED = 'DELETED',
+}
+
+export enum ResumeCandidateGender {
+  MALE = 'MALE',
+  FEMALE = 'FEMALE',
+  UNKNOWN = 'UNKNOWN',
+}
+
+export enum ResumeCandidateDoctorType {
+  PEDIATRIC = 'PEDIATRIC',
+  THERAPIST = 'THERAPIST',
+  FAMILY = 'FAMILY',
 }
 
 export interface ResumeUploadedFile {
@@ -99,6 +113,7 @@ export interface ResumeCandidate {
   phone: string | null;
   birthDate: string | null;
   city: string | null;
+  gender: ResumeCandidateGender;
   university: string | null;
   faculty: string | null;
   graduationYear: number | null;
@@ -127,6 +142,7 @@ export interface ResumeCandidate {
   additionalSkills: string | null;
   branches: string[];
   status: ResumeCandidateStatus;
+  doctorTypes: ResumeCandidateDoctorType[];
   priority: ResumeCandidatePriority;
   processingStatus: ResumeProcessingStatus;
   processingError: string | null;
@@ -201,6 +217,8 @@ export interface AnalyticsData {
   funnel: FunnelStage[];
   specializations: { name: string; count: number }[];
   categories: CategoryItem[];
+  genderDistribution: CategoryItem[];
+  doctorTypeDistribution: CategoryItem[];
   experienceBuckets: { name: string; count: number }[];
   branchDistribution: BranchDistributionItem[];
   branchCoverage: BranchCoverageRow[];

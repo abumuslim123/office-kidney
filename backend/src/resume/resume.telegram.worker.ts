@@ -116,8 +116,8 @@ function formatSummary(data: CvParsedOutput): string {
     }
   }
 
-  if (data.confidence !== undefined) {
-    lines.push(`\nКачество сканирования: ${Math.round(data.confidence * 100)}%`);
+  if ((data as any).confidence !== undefined) {
+    lines.push(`\nКачество сканирования: ${Math.round((data as any).confidence * 100)}%`);
   }
 
   return lines.join('\n');
@@ -338,7 +338,7 @@ async function processFile(
       await service.setCandidateProcessingStatus(
         candidateId,
         'COMPLETED',
-        parsed.confidence,
+        (parsed as any).confidence,
       );
       await ctx.reply(
         `Обнаружен точный дубликат (совпадение ${Math.round((dupResult.similarity ?? 0) * 100)}%). ` +
@@ -365,7 +365,7 @@ async function processFile(
     await service.setCandidateProcessingStatus(
       candidateId,
       'COMPLETED',
-      parsed.confidence,
+      (parsed as any).confidence,
     );
 
     // 6. Send summary to chat

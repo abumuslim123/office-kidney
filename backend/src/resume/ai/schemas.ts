@@ -37,6 +37,7 @@ export const CvParsedOutputSchema = z.object({
   phone: z.string().nullable().catch(null).describe('Phone number'),
   birthDate: z.string().nullable().catch(null).describe('Date of birth in YYYY-MM-DD format'),
   city: z.string().nullable().catch(null).describe('City of residence'),
+  gender: z.enum(['MALE', 'FEMALE', 'UNKNOWN']).catch('UNKNOWN').describe('Gender inferred from name and text grammar'),
   university: z.string().nullable().catch(null).describe('Primary medical university/institute'),
   faculty: z.string().nullable().catch(null).describe('Faculty at primary university'),
   graduationYear: z.number().nullable().catch(null).describe('Year of graduation from primary university'),
@@ -65,10 +66,19 @@ export const CvParsedOutputSchema = z.object({
   workHistory: z.array(WorkHistorySchema).catch([]).describe('Complete work history'),
   education: z.array(EducationSchema).catch([]).describe('All education entries'),
   cmeCourses: z.array(CmeCourseSchema).catch([]).describe('Continuing medical education courses'),
-  confidence: z.number().min(0).max(1).catch(0.5).describe('Confidence score 0-1 for parsing quality'),
 });
 
 export type CvParsedOutput = z.infer<typeof CvParsedOutputSchema>;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const cvJsonSchema = z.toJSONSchema(CvParsedOutputSchema as any);
+
+export const QualityEvaluationSchema = z.object({
+  score: z.number().min(0).max(1).catch(0.5),
+  issues: z.array(z.string()).catch([]),
+});
+
+export type QualityEvaluation = z.infer<typeof QualityEvaluationSchema>;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const qualityJsonSchema = z.toJSONSchema(QualityEvaluationSchema as any);
