@@ -1,10 +1,10 @@
 import { NavLink } from 'react-router-dom';
 
+const resumeEnabled = import.meta.env.VITE_FEATURE_RESUME !== 'false';
+
 type HrTabsProps = {
   active?: 'lists' | 'events' | 'resume';
 };
-
-const resumeEnabled = import.meta.env.VITE_FEATURE_RESUME !== 'false';
 
 export default function HrTabs({ active }: HrTabsProps) {
   const linkClass = (isActive: boolean, forceActive = false) =>

@@ -1,40 +1,134 @@
-import { IsArray, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsEmail,
+  IsOptional,
+  IsArray,
+  MinLength,
+  MaxLength,
+  IsUUID,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
-export class PublicApplySubmitDto {
-  @IsOptional()
+class WorkHistoryItemDto {
   @IsString()
-  @MaxLength(300)
-  fullName?: string;
+  @MinLength(1)
+  organization: string;
+
+  @IsString()
+  @MinLength(1)
+  position: string;
+
+  @IsString()
+  @IsOptional()
+  department?: string;
+
+  @IsString()
+  @IsOptional()
+  city?: string;
+
+  @IsString()
+  @IsOptional()
+  startDate?: string;
+
+  @IsString()
+  @IsOptional()
+  endDate?: string;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(255)
-  email?: string;
+  isCurrent?: boolean;
 
-  @IsOptional()
   @IsString()
-  @MaxLength(255)
-  phone?: string;
+  @IsOptional()
+  description?: string;
+}
 
-  @IsOptional()
+class EducationItemDto {
   @IsString()
-  @MaxLength(255)
+  @MinLength(1)
+  institution: string;
+
+  @IsString()
+  @IsOptional()
+  faculty?: string;
+
+  @IsString()
+  @IsOptional()
+  specialty?: string;
+
+  @IsString()
+  @IsOptional()
+  degree?: string;
+
+  @IsString()
+  @IsOptional()
   city?: string;
 
   @IsOptional()
+  startYear?: number;
+
+  @IsOptional()
+  endYear?: number;
+
   @IsString()
-  @MaxLength(255)
+  @IsOptional()
+  type?: string;
+}
+
+export class PublicApplySubmitDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(300)
+  fullName: string;
+
+  @IsEmail()
+  @IsOptional()
+  email?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(30)
+  phone?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(200)
+  city?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(200)
   specialization?: string;
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
+  @MaxLength(50000)
   rawText?: string;
 
+  @IsUUID()
   @IsOptional()
-  @IsString()
   uploadedFileId?: string;
 
-  @IsOptional()
   @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
   branches?: string[];
+
+  // Honeypot field — if filled, it's a bot
+  @IsString()
+  @IsOptional()
+  website?: string;
+
+  // Wizard step data
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => WorkHistoryItemDto)
+  @IsOptional()
+  workHistory?: WorkHistoryItemDto[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => EducationItemDto)
+  @IsOptional()
+  education?: EducationItemDto[];
 }

@@ -1,13 +1,13 @@
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsString, MinLength, MaxLength, IsOptional } from 'class-validator';
 
-export class CreateResumeTagDto {
+export class CreateTagDto {
   @IsString()
   @MinLength(1)
-  @MaxLength(150)
+  @MaxLength(100)
   label: string;
 
-  @IsOptional()
   @IsString()
   @MaxLength(50)
+  @IsOptional()
   color?: string;
 }

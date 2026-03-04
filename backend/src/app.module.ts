@@ -35,9 +35,9 @@ import { AddProcessesAccessAndPush1739500000000 } from './migrations/17395000000
 import { AddProcessActivityLog1739600000000 } from './migrations/1739600000000-AddProcessActivityLog';
 import { AddProcessesApprovePermission1739700000000 } from './migrations/1739700000000-AddProcessesApprovePermission';
 import { AddProcessVersionChecklist1739800000000 } from './migrations/1739800000000-AddProcessVersionChecklist';
+import { ProcessesModule } from './processes/processes.module';
 import { AddResumeModule1741000000000 } from './migrations/1741000000000-AddResumeModule';
 import { AddResumePermissions1741000001000 } from './migrations/1741000001000-AddResumePermissions';
-import { ProcessesModule } from './processes/processes.module';
 import { ResumeModule } from './resume/resume.module';
 
 @Module({

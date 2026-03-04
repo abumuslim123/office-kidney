@@ -1,82 +1,59 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../../lib/api';
-import type { UploadedItem } from '../../lib/resume-types';
 
-interface Props {
-  onUpload: (item: UploadedItem) => void;
-  onUpdate: (id: string, updates: Partial<UploadedItem>) => void;
-}
+type Props = {
+  onCreated: () => void;
+};
 
-export default function ResumeTextPasteArea({ onUpload, onUpdate }: Props) {
+export default function ResumeTextPasteArea({ onCreated }: Props) {
   const [text, setText] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const pollingRefs = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
-    return () => {
-      for (const interval of pollingRefs.current.values()) clearInterval(interval);
-    };
-  }, []);
-
-  const startPolling = useCallback((uploadId: string, candidateId: string) => {
-    const interval = setInterval(async () => {
-      try {
-        const res = await api.get(`/resume/candidates/${candidateId}`);
-        const data = res.data as { processingStatus: UploadedItem['processingStatus']; processingError?: string };
-        onUpdate(uploadId, { processingStatus: data.processingStatus, candidateId, error: data.processingError });
-        if (data.processingStatus === 'COMPLETED' || data.processingStatus === 'FAILED') {
-          clearInterval(interval);
-          pollingRefs.current.delete(uploadId);
-        }
-      } catch { /* retry */ }
-    }, 3000);
-    pollingRefs.current.set(uploadId, interval);
-  }, [onUpdate]);
-
-  const handleSubmit = useCallback(async () => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     const trimmed = text.trim();
     if (!trimmed) return;
-    setIsSubmitting(true);
-
-    const uploadId = crypto.randomUUID();
-    onUpload({
-      id: uploadId,
-      name: `Текст (${trimmed.slice(0, 30)}${trimmed.length > 30 ? '...' : ''})`,
-      type: 'text',
-      processingStatus: 'PENDING',
-    });
-
+    setError('');
+    setSubmitting(true);
     try {
-      const res = await api.post('/resume/candidates', { rawText: trimmed });
-      const data = res.data as { id: string; candidateId?: string };
-      const candidateId = data.candidateId || data.id;
-      onUpdate(uploadId, { processingStatus: 'EXTRACTING', candidateId });
+      await api.post('/resume/candidates', { rawText: trimmed });
       setText('');
-      startPolling(uploadId, candidateId);
-    } catch {
-      onUpdate(uploadId, { processingStatus: 'FAILED', error: 'Не удалось отправить текст' });
+      onCreated();
+    } catch (err: unknown) {
+      const data =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { message?: string } } }).response?.data
+          : null;
+      setError(data?.message || 'Ошибка создания кандидата');
     } finally {
-      setIsSubmitting(false);
+      setSubmitting(false);
     }
-  }, [text, onUpload, onUpdate, startPolling]);
+  };
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-5">
-      <h3 className="text-sm font-semibold text-gray-900 mb-3">Вставить текст</h3>
+    <form onSubmit={handleSubmit}>
       <textarea
-        placeholder="Вставьте текст резюме..."
         value={text}
         onChange={(e) => setText(e.target.value)}
+        placeholder="Вставьте текст резюме..."
         rows={6}
-        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+        maxLength={50000}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-accent/30 focus:border-accent resize-y"
       />
-      <button
-        onClick={handleSubmit}
-        disabled={!text.trim() || isSubmitting}
-        className="mt-3 px-4 py-2 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-      >
-        {isSubmitting ? 'Отправка...' : 'Обработать'}
-      </button>
-    </div>
+      {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
+      <div className="mt-2 flex items-center justify-between">
+        <span className="text-xs text-gray-400">
+          {text.length.toLocaleString()} / 50 000
+        </span>
+        <button
+          type="submit"
+          disabled={!text.trim() || submitting}
+          className="px-4 py-2 text-sm font-medium rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-50 transition-colors"
+        >
+          {submitting ? 'Отправка...' : 'Создать кандидата'}
+        </button>
+      </div>
+    </form>
   );
 }

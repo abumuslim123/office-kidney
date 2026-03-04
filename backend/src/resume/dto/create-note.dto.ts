@@ -1,9 +1,9 @@
 import { IsString, MinLength, MaxLength } from 'class-validator';
 
-export class CreateResumeNoteDto {
+export class CreateNoteDto {
   @IsString()
   @MinLength(1)
-  @MaxLength(4000)
+  @MaxLength(10000)
   content: string;
 
   @IsString()

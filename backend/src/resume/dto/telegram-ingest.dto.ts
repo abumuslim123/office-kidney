@@ -1,31 +1,30 @@
-import { IsOptional, IsString } from 'class-validator';
+import { IsString, IsOptional, IsNumber } from 'class-validator';
 
 export class TelegramIngestDto {
-  @IsOptional()
-  @IsString()
-  chatId?: string;
+  @IsNumber()
+  chatId: number;
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
   username?: string;
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
   firstName?: string;
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
   rawText?: string;
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
   fileBase64?: string;
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
   fileName?: string;
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
   mimeType?: string;
 }

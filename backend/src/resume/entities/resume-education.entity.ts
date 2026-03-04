@@ -1,13 +1,20 @@
-import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { ResumeCandidate } from './resume-candidate.entity';
 
 @Entity('resume_education')
-@Index('IDX_resume_education_candidateId', ['candidateId'])
+@Index(['candidateId'])
 export class ResumeEducation {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ length: 300 })
+  @Column({ type: 'varchar', length: 300 })
   institution: string;
 
   @Column({ type: 'varchar', nullable: true })
@@ -34,7 +41,9 @@ export class ResumeEducation {
   @Column({ type: 'uuid' })
   candidateId: string;
 
-  @ManyToOne(() => ResumeCandidate, (candidate) => candidate.education, { onDelete: 'CASCADE' })
+  @ManyToOne(() => ResumeCandidate, (candidate) => candidate.education, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'candidateId' })
   candidate: ResumeCandidate;
 }

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
+import type { ResumeCandidate } from '../lib/resume-types';
 import {
   CANDIDATE_STATUSES,
   CANDIDATE_STATUS_COLORS,
@@ -8,310 +9,478 @@ import {
   CANDIDATE_PRIORITY_COLORS,
   QUALIFICATION_CATEGORIES,
   CATEGORY_COLORS,
-  formatDate,
-  formatExperienceYears,
+  PREDEFINED_TAGS,
+  formatDateTime,
   formatPhoneForWhatsApp,
   getDaysUntil,
 } from '../lib/resume-constants';
-import type { CandidateRow } from '../lib/resume-types';
-import ResumeFiltersBar from '../components/resume/ResumeFiltersBar';
+import ResumeFiltersBar, { emptyFilters, type ResumeFilters } from '../components/resume/ResumeFiltersBar';
 import ResumeBranchesCell from '../components/resume/ResumeBranchesCell';
-import ResumeProcessingStatus from '../components/resume/ResumeProcessingStatus';
+
+const PAGE_SIZES = [10, 25, 50, 100];
 
 export default function ResumeCandidatesPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [candidates, setCandidates] = useState<CandidateRow[]>([]);
+  const [candidates, setCandidates] = useState<ResumeCandidate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [limit, setLimit] = useState(25);
+  const [filters, setFilters] = useState<ResumeFilters>(emptyFilters);
   const [exporting, setExporting] = useState(false);
-  const [deduping, setDeduping] = useState(false);
-  const [dedupResult, setDedupResult] = useState<string | null>(null);
+  const [deduplicating, setDeduplicating] = useState(false);
+  const [sortBy, setSortBy] = useState('createdAt');
+  const [sortOrder, setSortOrder] = useState<'ASC' | 'DESC'>('DESC');
+  const [tagDropdownId, setTagDropdownId] = useState<string | null>(null);
+  const [contactPopupId, setContactPopupId] = useState<string | null>(null);
+  const tagDropdownRef = useRef<HTMLDivElement>(null);
+  const contactPopupRef = useRef<HTMLDivElement>(null);
 
-  const page = Number(searchParams.get('page')) || 1;
-  const pageSize = 20;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const buildParams = useCallback(() => {
+    const params: Record<string, string | number> = { page, limit, sort: sortBy, order: sortOrder };
+    if (filters.search) params.search = filters.search;
+    if (filters.specialization) params.specialization = filters.specialization;
+    if (filters.branch) params.branch = filters.branch;
+    if (filters.status) params.status = filters.status;
+    if (filters.priority) params.priority = filters.priority;
+    if (filters.category) params.qualificationCategory = filters.category;
+    if (filters.city) params.city = filters.city;
+    if (filters.workCity) params.workCity = filters.workCity;
+    if (filters.educationCity) params.educationCity = filters.educationCity;
+    if (filters.experience) {
+      const [min, max] = filters.experience.split('-');
+      if (min) params.experienceMin = Number(min);
+      if (max) params.experienceMax = Number(max);
+    }
+    if (filters.accreditation) params.accreditation = filters.accreditation;
+    return params;
+  }, [page, limit, sortBy, sortOrder, filters]);
 
-  const filters = useMemo(() => ({
-    search: searchParams.get('search') || '',
-    specialization: searchParams.get('specialization') || '',
-    category: searchParams.get('category') || '',
-    status: searchParams.get('status') || '',
-    priority: searchParams.get('priority') || '',
-    branch: searchParams.get('branch') || '',
-    city: searchParams.get('city') || '',
-    workCity: searchParams.get('workCity') || '',
-    educationCity: searchParams.get('educationCity') || '',
-    experience: searchParams.get('experience') || '',
-    accreditation: searchParams.get('accreditation') || '',
-  }), [searchParams]);
-
-  const setFilters = useCallback((f: typeof filters) => {
-    const params = new URLSearchParams();
-    Object.entries(f).forEach(([k, v]) => { if (v) params.set(k, v); });
-    setSearchParams(params, { replace: true });
-  }, [setSearchParams]);
-
-  const goToPage = useCallback((p: number) => {
-    const params = new URLSearchParams(searchParams);
-    if (p <= 1) params.delete('page'); else params.set('page', String(p));
-    setSearchParams(params, { replace: true });
-  }, [searchParams, setSearchParams]);
-
-  const loadCandidates = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params: Record<string, string | number> = { page, limit: pageSize };
-      Object.entries(filters).forEach(([k, v]) => { if (v) params[k] = v; });
-      const res = await api.get<{ candidates: CandidateRow[]; total: number }>('/resume/candidates', { params });
-      setCandidates(res.data.candidates);
+      const res = await api.get<{ data: ResumeCandidate[]; total: number }>('/resume/candidates', {
+        params: buildParams(),
+      });
+      setCandidates(res.data.data);
       setTotal(res.data.total);
-    } catch { /* */ } finally {
+    } catch {
+      /* ignore */
+    } finally {
       setLoading(false);
     }
-  }, [page, filters]);
+  }, [buildParams]);
 
-  useEffect(() => { loadCandidates(); }, [loadCandidates]);
-
-  async function updateField(id: string, field: string, value: unknown) {
+  const silentReload = useCallback(async () => {
     try {
-      await api.put(`/resume/candidates/${id}`, { [field]: value });
-      loadCandidates();
-    } catch { /* */ }
-  }
+      const res = await api.get<{ data: ResumeCandidate[]; total: number }>('/resume/candidates', {
+        params: buildParams(),
+      });
+      setCandidates(res.data.data);
+      setTotal(res.data.total);
+    } catch { /* ignore */ }
+  }, [buildParams]);
 
-  async function reprocess(id: string) {
-    await api.post(`/resume/candidates/${id}/reprocess`);
-    loadCandidates();
-  }
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const handleExport = useCallback(async () => {
+  // Close tag dropdown on outside click
+  useEffect(() => {
+    if (!tagDropdownId) return;
+    const handler = (e: MouseEvent) => {
+      if (tagDropdownRef.current && !tagDropdownRef.current.contains(e.target as Node)) {
+        setTagDropdownId(null);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [tagDropdownId]);
+
+  // Close contact popup on outside click
+  useEffect(() => {
+    if (!contactPopupId) return;
+    const handler = (e: MouseEvent) => {
+      if (contactPopupRef.current && !contactPopupRef.current.contains(e.target as Node)) {
+        setContactPopupId(null);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [contactPopupId]);
+
+  const handleFiltersChange = (f: ResumeFilters) => {
+    setPage(1);
+    setFilters(f);
+  };
+
+  const handleExport = async () => {
     setExporting(true);
     try {
-      const params: Record<string, string> = {};
-      Object.entries(filters).forEach(([k, v]) => { if (v) params[k] = v; });
-      const res = await api.get('/resume/candidates/export', { params, responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const res = await api.get('/resume/export', {
+        params: buildParams(),
+        responseType: 'blob',
+      });
+      const url = URL.createObjectURL(res.data as Blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `candidates_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.download = `candidates-${new Date().toISOString().slice(0, 10)}.xlsx`;
       a.click();
-      window.URL.revokeObjectURL(url);
-    } catch { /* */ } finally {
+      URL.revokeObjectURL(url);
+    } catch {
+      /* ignore */
+    } finally {
       setExporting(false);
     }
-  }, [filters]);
+  };
 
-  const handleDedup = useCallback(async () => {
-    setDeduping(true);
-    setDedupResult(null);
+  const handleDeduplicate = async () => {
+    if (!confirm('Запустить массовую проверку дубликатов? Это может занять некоторое время.')) return;
+    setDeduplicating(true);
     try {
-      const body: Record<string, string> = {};
-      Object.entries(filters).forEach(([k, v]) => { if (v) body[k] = v; });
-      const res = await api.post<{ deleted: number; tagged: number }>('/resume/candidates/deduplicate', body);
-      const parts: string[] = [];
-      if (res.data.deleted > 0) parts.push(`удалено ${res.data.deleted}`);
-      if (res.data.tagged > 0) parts.push(`помечено ${res.data.tagged}`);
-      setDedupResult(parts.length > 0 ? parts.join(', ') : 'дубликатов не найдено');
-      loadCandidates();
+      const res = await api.post<{ deleted: number; tagged: number }>('/resume/deduplicate');
+      alert(`Удалено дубликатов: ${res.data.deleted}, помечено похожих: ${res.data.tagged}`);
+      load();
     } catch {
-      setDedupResult('ошибка');
+      /* ignore */
     } finally {
-      setDeduping(false);
+      setDeduplicating(false);
     }
-  }, [filters, loadCandidates]);
+  };
 
-  const paginationItems = useMemo(() => {
-    const items: (number | 'ellipsis')[] = [];
-    const pages = Array.from({ length: totalPages }, (_, i) => i + 1)
-      .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 1);
-    pages.forEach((p, idx) => {
-      if (idx > 0 && p - pages[idx - 1] > 1) items.push('ellipsis');
-      items.push(p);
-    });
-    return items;
-  }, [totalPages, page]);
+  const updateField = async (id: string, field: string, value: string) => {
+    try {
+      await api.patch(`/resume/candidates/${id}`, { [field]: value });
+      silentReload();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleRetry = async (id: string) => {
+    try {
+      await api.post(`/resume/candidates/${id}/reprocess`);
+      load();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleAddTag = async (candidateId: string, label: string, color: string) => {
+    try {
+      await api.post(`/resume/candidates/${candidateId}/tags`, { label, color });
+      setTagDropdownId(null);
+      silentReload();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleRemoveTag = async (tagId: string) => {
+    try {
+      await api.delete(`/resume/tags/${tagId}`);
+      silentReload();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleSort = (column: string) => {
+    if (sortBy === column) {
+      setSortOrder((prev) => (prev === 'ASC' ? 'DESC' : 'ASC'));
+    } else {
+      setSortBy(column);
+      setSortOrder('ASC');
+    }
+    setPage(1);
+  };
+
+  const totalPages = Math.ceil(total / limit);
+
+  const SortHeader = ({ column, label, className }: { column: string; label: string; className?: string }) => (
+    <th
+      className={`text-left px-3 py-2 font-medium text-gray-600 cursor-pointer select-none hover:text-gray-900 group whitespace-nowrap ${className || ''}`}
+      onClick={() => handleSort(column)}
+    >
+      <span className="inline-flex items-center gap-0.5">
+        {label}
+        {sortBy === column ? (
+          sortOrder === 'ASC' ? (
+            <svg className="w-3.5 h-3.5 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+          ) : (
+            <svg className="w-3.5 h-3.5 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+          )
+        ) : (
+          <svg className="w-3.5 h-3.5 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" /></svg>
+        )}
+      </span>
+    </th>
+  );
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">База кандидатов</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          {total} {total === 1 ? 'кандидат' : 'кандидатов'} найдено
-        </p>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-gray-900">
+          Кандидаты <span className="text-sm font-normal text-gray-400">({total})</span>
+        </h2>
       </div>
 
       <ResumeFiltersBar
         filters={filters}
-        onChange={setFilters}
+        onChange={handleFiltersChange}
         onExport={handleExport}
-        onDedup={handleDedup}
+        onDeduplicate={handleDeduplicate}
         exporting={exporting}
-        deduping={deduping}
-        dedupResult={dedupResult}
+        deduplicating={deduplicating}
       />
 
-      <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">ФИО</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Специализация</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Филиал</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Категория</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Стаж</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Аккредитация</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Этап</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Приоритет</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Теги</th>
-                <th className="px-4 py-3"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {loading ? (
-                <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-500">Загрузка...</td></tr>
-              ) : candidates.length === 0 ? (
-                <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-500">Кандидаты не найдены</td></tr>
-              ) : candidates.map((c) => {
-                const isProcessing = c.processingStatus !== 'COMPLETED' && c.processingStatus !== 'FAILED';
-                const isFailed = c.processingStatus === 'FAILED';
-                const daysLeft = getDaysUntil(c.accreditationExpiryDate);
-                const isExpired = daysLeft !== null && daysLeft <= 0;
-                const isExpiring = daysLeft !== null && daysLeft <= 90 && daysLeft > 0;
-
-                return (
-                  <tr key={c.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3">
-                      <Link to={`/hr/resume/candidates/${c.id}`} className="font-medium text-indigo-600 hover:text-indigo-800">
-                        {c.fullName}
-                      </Link>
-                      {isProcessing && (
-                        <div className="mt-1"><ResumeProcessingStatus status={c.processingStatus} /></div>
-                      )}
-                      {isFailed && (
-                        <div className="mt-1 flex items-center gap-2">
-                          <span className="text-xs text-red-600">Ошибка обработки</span>
-                          <button onClick={() => reprocess(c.id)} className="text-xs text-indigo-600 hover:underline">Повторить</button>
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">{c.specialization || '—'}</td>
-                    <td className="px-4 py-3">
-                      <ResumeBranchesCell candidateId={c.id} branches={c.branches} onUpdate={loadCandidates} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-block text-xs px-2 py-0.5 rounded-full font-medium ${CATEGORY_COLORS[c.qualificationCategory] || CATEGORY_COLORS.NONE}`}>
-                        {QUALIFICATION_CATEGORIES[c.qualificationCategory] || c.qualificationCategory}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">{formatExperienceYears(c.totalExperienceYears)}</td>
-                    <td className="px-4 py-3">
-                      {!c.accreditationStatus ? (
-                        <span className="text-xs text-gray-400">Нет</span>
-                      ) : (
-                        <div>
-                          <span className="text-xs">{formatDate(c.accreditationExpiryDate)}</span>
-                          {isExpired && <span className="ml-1 text-xs text-red-600 font-medium">Истекла</span>}
-                          {isExpiring && <span className="ml-1 text-xs text-amber-600 font-medium">{daysLeft} дн.</span>}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <select
-                        value={c.status}
-                        onChange={(e) => { e.stopPropagation(); updateField(c.id, 'status', e.target.value); }}
-                        onClick={(e) => e.stopPropagation()}
-                        className={`text-xs px-2 py-1 rounded border-0 font-medium cursor-pointer ${CANDIDATE_STATUS_COLORS[c.status] || ''}`}
-                      >
-                        {Object.entries(CANDIDATE_STATUSES).map(([k, v]) => (
-                          <option key={k} value={k}>{v}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-4 py-3">
-                      <select
-                        value={c.priority}
-                        onChange={(e) => { e.stopPropagation(); updateField(c.id, 'priority', e.target.value); }}
-                        onClick={(e) => e.stopPropagation()}
-                        className={`text-xs px-2 py-1 rounded border-0 font-medium cursor-pointer ${CANDIDATE_PRIORITY_COLORS[c.priority] || ''}`}
-                      >
-                        {Object.entries(CANDIDATE_PRIORITIES).map(([k, v]) => (
-                          <option key={k} value={k}>{v}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-1">
-                        {(c.tags || []).slice(0, 3).map((tag) => (
-                          <span key={tag.id} className="inline-block text-[10px] px-1.5 py-0.5 rounded text-white" style={{ backgroundColor: tag.color || '#64748b' }}>
-                            {tag.label}
+      {loading ? (
+        <p className="text-sm text-gray-400">Загрузка...</p>
+      ) : candidates.length === 0 ? (
+        <p className="text-sm text-gray-400">Кандидаты не найдены</p>
+      ) : (
+        <>
+          <div className="bg-white border border-gray-200 rounded-xl overflow-visible">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50/80 border-b border-gray-200">
+                  <SortHeader column="fullName" label="ФИО" />
+                  <SortHeader column="specialization" label="Специализация" />
+                  <th className="text-left px-3 py-2 font-medium text-gray-600">Филиал</th>
+                  <SortHeader column="qualificationCategory" label="Категория" />
+                  <SortHeader column="totalExperienceYears" label="Стаж" />
+                  <SortHeader column="accreditationExpiryDate" label="Аккредитация" />
+                  <SortHeader column="status" label="Этап" />
+                  <SortHeader column="priority" label="Приоритет" />
+                  <th className="text-left px-3 py-2 font-medium text-gray-600">Теги</th>
+                  <th className="text-left px-3 py-2 font-medium text-gray-600">Контакты</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {candidates.map((c) => {
+                  const accDays = getDaysUntil(c.accreditationExpiryDate);
+                  return (
+                    <tr key={c.id} className="hover:bg-gray-50/50">
+                      {/* ФИО */}
+                      <td className="px-3 py-2">
+                        <Link to={`/hr/resume/candidates/${c.id}`} className="text-accent hover:underline font-medium">
+                          {c.fullName || '—'}
+                        </Link>
+                        <div className="text-xs text-gray-400">{formatDateTime(c.createdAt)}</div>
+                      </td>
+                      {/* Специализация */}
+                      <td className="px-3 py-2 text-gray-600 max-w-[160px] truncate">{c.specialization || '—'}</td>
+                      {/* Филиал */}
+                      <td className="px-3 py-2">
+                        <ResumeBranchesCell candidateId={c.id} branches={c.branches} onUpdated={silentReload} />
+                      </td>
+                      {/* Категория */}
+                      <td className="px-3 py-2">
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${CATEGORY_COLORS[c.qualificationCategory] || ''}`}>
+                          {QUALIFICATION_CATEGORIES[c.qualificationCategory] || '—'}
+                        </span>
+                      </td>
+                      {/* Стаж */}
+                      <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
+                        {c.totalExperienceYears != null ? `${c.totalExperienceYears} лет` : '—'}
+                      </td>
+                      {/* Аккредитация */}
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {c.accreditationStatus ? (
+                          <span
+                            className={`text-xs font-medium ${
+                              accDays !== null && accDays < 0
+                                ? 'text-red-600'
+                                : accDays !== null && accDays < 90
+                                  ? 'text-amber-600'
+                                  : 'text-green-600'
+                            }`}
+                          >
+                            {c.accreditationExpiryDate
+                              ? new Date(c.accreditationExpiryDate).toLocaleDateString('ru-RU')
+                              : 'Есть'}
+                            {accDays !== null && accDays < 0 && (
+                              <span className="ml-1 text-red-500">⚠ Истекла</span>
+                            )}
                           </span>
-                        ))}
-                        {(c.tags || []).length > 3 && <span className="text-[10px] text-gray-400">+{c.tags.length - 3}</span>}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      {c.phone && (
-                        <div className="flex items-center gap-1">
-                          <a href={`tel:${c.phone}`} onClick={(e) => e.stopPropagation()} className="text-gray-400 hover:text-gray-600" title="Позвонить">
-                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
-                            </svg>
-                          </a>
-                          <a href={`https://wa.me/${formatPhoneForWhatsApp(c.phone)}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-gray-400 hover:text-green-600" title="WhatsApp">
-                            <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z" />
-                            </svg>
-                          </a>
+                        ) : (
+                          <span className="text-xs text-gray-400">Нет аккредитации</span>
+                        )}
+                      </td>
+                      {/* Этап */}
+                      <td className="px-3 py-2">
+                        <select
+                          value={c.status}
+                          onChange={(e) => updateField(c.id, 'status', e.target.value)}
+                          className={`text-xs font-medium rounded-full px-2 py-0.5 border-0 cursor-pointer ${CANDIDATE_STATUS_COLORS[c.status] || ''}`}
+                        >
+                          {Object.entries(CANDIDATE_STATUSES).map(([k, v]) => (
+                            <option key={k} value={k}>{v}</option>
+                          ))}
+                        </select>
+                      </td>
+                      {/* Приоритет */}
+                      <td className="px-3 py-2">
+                        <select
+                          value={c.priority}
+                          onChange={(e) => updateField(c.id, 'priority', e.target.value)}
+                          className={`text-xs font-medium rounded-full px-2 py-0.5 border-0 cursor-pointer ${CANDIDATE_PRIORITY_COLORS[c.priority] || ''}`}
+                        >
+                          {Object.entries(CANDIDATE_PRIORITIES).map(([k, v]) => (
+                            <option key={k} value={k}>{v}</option>
+                          ))}
+                        </select>
+                      </td>
+                      {/* Теги */}
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap items-center gap-1">
+                          {/* Системные теги обработки */}
+                          {['PENDING', 'EXTRACTING', 'PARSING'].includes(c.processingStatus) && (
+                            <span className="inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-700 animate-pulse leading-tight">
+                              AI Обработка
+                            </span>
+                          )}
+                          {c.processingStatus === 'FAILED' && (
+                            <button
+                              type="button"
+                              onClick={() => handleRetry(c.id)}
+                              className="inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-700 hover:bg-red-200 transition-colors cursor-pointer leading-tight"
+                            >
+                              Ошибка ↻
+                            </button>
+                          )}
+                          {/* Пользовательские теги */}
+                          {(c.tags || []).map((tag) => (
+                            <span
+                              key={tag.id}
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium text-white leading-tight"
+                              style={{ backgroundColor: tag.color || '#6b7280' }}
+                            >
+                              {tag.label}
+                              <button type="button" onClick={() => handleRemoveTag(tag.id)} className="ml-0.5 hover:text-white/70 leading-none">×</button>
+                            </span>
+                          ))}
+                          <div className="relative" ref={tagDropdownId === c.id ? tagDropdownRef : undefined}>
+                            <button
+                              type="button"
+                              onClick={() => setTagDropdownId(tagDropdownId === c.id ? null : c.id)}
+                              className="w-5 h-5 flex items-center justify-center rounded-full text-gray-400 hover:text-accent hover:bg-gray-100 transition-colors"
+                              title="Добавить тег"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                            </button>
+                            {tagDropdownId === c.id && (
+                              <div className="absolute z-30 top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-1.5 min-w-[150px]">
+                                {PREDEFINED_TAGS
+                                  .filter((p) => !(c.tags || []).some((t) => t.label === p.label))
+                                  .map((p) => (
+                                    <button
+                                      key={p.label}
+                                      type="button"
+                                      onClick={() => handleAddTag(c.id, p.label, p.color)}
+                                      className="block w-full text-left px-2 py-1 text-xs rounded hover:bg-gray-50 transition-colors"
+                                    >
+                                      <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ backgroundColor: p.color }} />
+                                      {p.label}
+                                    </button>
+                                  ))}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      </td>
+                      {/* Контакты */}
+                      <td className="px-3 py-2">
+                        {c.phone && (
+                          <div className="relative" ref={contactPopupId === c.id ? contactPopupRef : undefined}>
+                            <button
+                              type="button"
+                              onClick={() => setContactPopupId(contactPopupId === c.id ? null : c.id)}
+                              className="w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:text-accent hover:bg-gray-100 transition-colors"
+                            >
+                              <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                            </button>
+                            {contactPopupId === c.id && (
+                              <div className="absolute z-30 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg p-3 min-w-[220px]">
+                                <div className="flex items-center gap-2 mb-3">
+                                  <span className="text-sm font-medium text-gray-900">{c.phone}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => navigator.clipboard.writeText(c.phone!)}
+                                    className="text-gray-400 hover:text-accent"
+                                    title="Скопировать"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                    </svg>
+                                  </button>
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                  <a
+                                    href={`tel:${c.phone}`}
+                                    className="flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-lg transition-colors"
+                                  >
+                                    Позвонить
+                                  </a>
+                                  <a
+                                    href={`https://wa.me/${formatPhoneForWhatsApp(c.phone)}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-white bg-green-500 hover:bg-green-600 rounded-lg transition-colors"
+                                  >
+                                    Написать в WhatsApp
+                                  </a>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
 
-        {totalPages > 1 && (
-          <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-between">
+          <div className="flex items-center justify-between">
             <span className="text-sm text-gray-500">
-              Показано {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} из {total}
+              {(page - 1) * limit + 1}–{Math.min(page * limit, total)} из {total}
             </span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => goToPage(page - 1)}
-                disabled={page <= 1}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+            <div className="flex items-center gap-3">
+              <select
+                value={limit}
+                onChange={(e) => {
+                  setLimit(Number(e.target.value));
+                  setPage(1);
+                }}
+                className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
               >
-                Назад
-              </button>
-              {paginationItems.map((item, idx) =>
-                item === 'ellipsis' ? (
-                  <span key={`e-${idx}`} className="px-2 text-gray-400">...</span>
-                ) : (
-                  <button
-                    key={item}
-                    onClick={() => goToPage(item)}
-                    className={`px-3 py-1.5 text-sm border rounded-md ${
-                      item === page ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    {item}
-                  </button>
-                ),
-              )}
-              <button
-                onClick={() => goToPage(page + 1)}
-                disabled={page >= totalPages}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
-              >
-                Вперёд
-              </button>
+                {PAGE_SIZES.map((s) => (
+                  <option key={s} value={s}>{s} на стр.</option>
+                ))}
+              </select>
+              <div className="flex gap-2">
+                <button
+                  disabled={page <= 1}
+                  onClick={() => setPage(page - 1)}
+                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg disabled:opacity-50 hover:bg-gray-50"
+                >
+                  Назад
+                </button>
+                <button
+                  disabled={page >= totalPages}
+                  onClick={() => setPage(page + 1)}
+                  className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg disabled:opacity-50 hover:bg-gray-50"
+                >
+                  Далее
+                </button>
+              </div>
             </div>
           </div>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 }

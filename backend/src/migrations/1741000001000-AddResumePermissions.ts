@@ -1,69 +1,35 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class AddResumePermissions1741000001000 implements MigrationInterface {
-  name = 'AddResumePermissions1741000001000';
-
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      INSERT INTO "permissions" ("id", "slug", "name") VALUES
-        (uuid_generate_v4(), 'hr_resume_view', 'HR Резюме: просмотр'),
-        (uuid_generate_v4(), 'hr_resume_edit', 'HR Резюме: редактирование'),
-        (uuid_generate_v4(), 'hr_resume_delete', 'HR Резюме: удаление'),
-        (uuid_generate_v4(), 'hr_resume_analytics', 'HR Резюме: аналитика'),
-        (uuid_generate_v4(), 'hr_resume_public_apply_manage', 'HR Резюме: публичные отклики'),
-        (uuid_generate_v4(), 'hr_resume_telegram_manage', 'HR Резюме: Telegram канал')
-      ON CONFLICT ("slug") DO NOTHING
+      INSERT INTO permissions (id, slug, name, description) VALUES
+        (gen_random_uuid(), 'hr_resume_view',               'Просмотр резюме',           'Просмотр раздела резюме'),
+        (gen_random_uuid(), 'hr_resume_edit',               'Редактирование резюме',      'Добавление и редактирование кандидатов'),
+        (gen_random_uuid(), 'hr_resume_delete',             'Удаление резюме',            'Удаление кандидатов'),
+        (gen_random_uuid(), 'hr_resume_analytics',          'Аналитика резюме',           'Просмотр аналитики резюме'),
+        (gen_random_uuid(), 'hr_resume_telegram_manage',    'Управление Telegram',        'Управление Telegram-ботом резюме'),
+        (gen_random_uuid(), 'hr_resume_public_apply_manage','Управление публичной формой','Управление публичной формой подачи резюме')
+      ON CONFLICT (slug) DO NOTHING
     `);
 
     await queryRunner.query(`
-      INSERT INTO "user_permissions" ("userId", "permissionId")
-      SELECT u."id", p."id"
-      FROM "users" u
-      JOIN "roles" r ON r."id" = u."roleId"
-      CROSS JOIN "permissions" p
-      WHERE r."slug" = 'admin'
-        AND p."slug" IN (
-          'hr_resume_view',
-          'hr_resume_edit',
-          'hr_resume_delete',
-          'hr_resume_analytics',
-          'hr_resume_public_apply_manage',
-          'hr_resume_telegram_manage'
-        )
-        AND NOT EXISTS (
-          SELECT 1
-          FROM "user_permissions" up
-          WHERE up."userId" = u."id" AND up."permissionId" = p."id"
-        )
+      INSERT INTO role_permissions (role_id, permission_id)
+      SELECT r.id, p.id FROM roles r, permissions p
+      WHERE r.slug = 'admin' AND p.slug LIKE 'hr_resume_%'
+      ON CONFLICT DO NOTHING
     `);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      DELETE FROM "user_permissions"
-      WHERE "permissionId" IN (
-        SELECT "id" FROM "permissions"
-        WHERE "slug" IN (
-          'hr_resume_view',
-          'hr_resume_edit',
-          'hr_resume_delete',
-          'hr_resume_analytics',
-          'hr_resume_public_apply_manage',
-          'hr_resume_telegram_manage'
-        )
+      DELETE FROM role_permissions
+      WHERE permission_id IN (
+        SELECT id FROM permissions WHERE slug LIKE 'hr_resume_%'
       )
     `);
-
     await queryRunner.query(`
-      DELETE FROM "permissions"
-      WHERE "slug" IN (
-        'hr_resume_view',
-        'hr_resume_edit',
-        'hr_resume_delete',
-        'hr_resume_analytics',
-        'hr_resume_public_apply_manage',
-        'hr_resume_telegram_manage'
-      )
+      DELETE FROM permissions WHERE slug LIKE 'hr_resume_%'
     `);
   }
 }

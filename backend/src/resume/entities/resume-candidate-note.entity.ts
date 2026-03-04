@@ -11,27 +11,29 @@ import {
 import { ResumeCandidate } from './resume-candidate.entity';
 
 @Entity('resume_candidate_notes')
-@Index('IDX_resume_candidate_notes_candidateId', ['candidateId'])
+@Index(['candidateId'])
 export class ResumeCandidateNote {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamp' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamp' })
   updatedAt: Date;
 
   @Column({ type: 'text' })
   content: string;
 
-  @Column({ length: 200 })
+  @Column({ type: 'varchar', length: 200 })
   authorName: string;
 
   @Column({ type: 'uuid' })
   candidateId: string;
 
-  @ManyToOne(() => ResumeCandidate, (candidate) => candidate.notes, { onDelete: 'CASCADE' })
+  @ManyToOne(() => ResumeCandidate, (candidate) => candidate.notes, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'candidateId' })
   candidate: ResumeCandidate;
 }

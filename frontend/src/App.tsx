@@ -13,16 +13,8 @@ import Bitrix24Employees from './pages/Bitrix24Employees';
 import HR from './pages/HR';
 import HrListView from './pages/HrListView';
 import HrEvents from './pages/HrEvents';
-import ResumeLayout from './components/resume/ResumeLayout';
-import ResumeUploadPage from './pages/ResumeUploadPage';
-import ResumeCandidatesPage from './pages/ResumeCandidatesPage';
-import ResumeCandidateDetailPage from './pages/ResumeCandidateDetailPage';
-import ResumeAnalyticsPage from './pages/ResumeAnalyticsPage';
-import ResumeArchivePage from './pages/ResumeArchivePage';
-import ResumeTrashPage from './pages/ResumeTrashPage';
 import HrEventsPublic from './pages/HrEventsPublic';
 import HrListsPublic from './pages/HrListsPublic';
-import ResumeApplyPublic from './pages/ResumeApplyPublic';
 import Screens from './pages/Screens';
 import ScreensSettings from './pages/ScreensSettings';
 import Calls from './pages/Calls';
@@ -31,6 +23,15 @@ import CallTopics from './pages/CallTopics';
 import CallsSettings from './pages/CallsSettings';
 import Processes from './pages/Processes';
 import Settings from './pages/Settings';
+import ResumeLayout from './components/resume/ResumeLayout';
+import ResumeUploadPage from './pages/ResumeUploadPage';
+import ResumeCandidatesPage from './pages/ResumeCandidatesPage';
+import ResumeCandidateDetailPage from './pages/ResumeCandidateDetailPage';
+import ResumeAnalyticsPage from './pages/ResumeAnalyticsPage';
+import ResumeArchivePage from './pages/ResumeArchivePage';
+import ResumeTrashPage from './pages/ResumeTrashPage';
+import ResumeApplyPublic from './pages/ResumeApplyPublic';
+import ResumeApplySuccess from './pages/ResumeApplySuccess';
 import ProtectedRoute from './components/ProtectedRoute';
 
 const resumeEnabled = import.meta.env.VITE_FEATURE_RESUME !== 'false';
@@ -58,6 +59,7 @@ function App() {
       <Route path="calendar/:token" element={<HrEventsPublic />} />
       <Route path="lists/:token" element={<HrListsPublic />} />
       {resumeEnabled && <Route path="resume/apply" element={<ResumeApplyPublic />} />}
+      {resumeEnabled && <Route path="resume/apply/success" element={<ResumeApplySuccess />} />}
       <Route
         path="/"
         element={
@@ -82,8 +84,10 @@ function App() {
         <Route path="calls/settings" element={<ProtectedRoute permissions={['calls_settings']}><CallsSettings /></ProtectedRoute>} />
         <Route path="hr" element={<ProtectedRoute permissions={['hr']}><HR /></ProtectedRoute>} />
         <Route path="hr/events" element={<ProtectedRoute permissions={['hr']}><HrEvents /></ProtectedRoute>} />
+        <Route path="hr/folder/:folderId" element={<ProtectedRoute permissions={['hr']}><HR /></ProtectedRoute>} />
+        <Route path="hr/:listId" element={<ProtectedRoute permissions={['hr']}><HrListView /></ProtectedRoute>} />
         {resumeEnabled && (
-          <Route path="hr/resume" element={<ProtectedRoute permissions={['hr', 'hr_resume_view']}><ResumeLayout /></ProtectedRoute>}>
+          <Route path="hr/resume" element={<ProtectedRoute permissions={['hr']}><ResumeLayout /></ProtectedRoute>}>
             <Route index element={<ResumeUploadPage />} />
             <Route path="candidates" element={<ResumeCandidatesPage />} />
             <Route path="candidates/:id" element={<ResumeCandidateDetailPage />} />
@@ -92,8 +96,6 @@ function App() {
             <Route path="trash" element={<ResumeTrashPage />} />
           </Route>
         )}
-        <Route path="hr/folder/:folderId" element={<ProtectedRoute permissions={['hr']}><HR /></ProtectedRoute>} />
-        <Route path="hr/:listId" element={<ProtectedRoute permissions={['hr']}><HrListView /></ProtectedRoute>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

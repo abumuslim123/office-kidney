@@ -1,56 +1,51 @@
-import { Link } from 'react-router-dom';
-import ResumeProcessingStatus from './ResumeProcessingStatus';
-import type { UploadedItem } from '../../lib/resume-types';
+import type { ResumeCandidate } from '../../lib/resume-types';
+import { ResumeProcessingStatus } from '../../lib/resume-types';
+import ResumeProcessingStatusBadge from './ResumeProcessingStatus';
+import { formatDateTime } from '../../lib/resume-constants';
 
-function formatFileSize(bytes?: number): string {
-  if (bytes == null) return '';
-  if (bytes < 1024) return `${bytes} Б`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
-}
+type Props = {
+  candidates: ResumeCandidate[];
+  onRetry?: (id: string) => void;
+};
 
-interface Props {
-  items: UploadedItem[];
-}
+export default function ResumeFileList({ candidates, onRetry }: Props) {
+  if (candidates.length === 0) {
+    return (
+      <p className="text-sm text-gray-400 py-4 text-center">
+        Нет недавних загрузок
+      </p>
+    );
+  }
 
-export default function ResumeFileList({ items }: Props) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white">
-      <div className="px-5 py-3 border-b border-gray-200">
-        <h3 className="text-sm font-semibold text-gray-900">Загруженные файлы</h3>
-      </div>
-      <div className="p-4 space-y-3">
-        {items.map((item) => {
-          const inner = (
-            <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3 hover:bg-gray-50 transition-colors">
-              <div className="flex items-center gap-3 overflow-hidden">
-                <svg className="h-5 w-5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                </svg>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-gray-900">{item.name}</p>
-                  {item.size != null && (
-                    <p className="text-xs text-gray-500">{formatFileSize(item.size)}</p>
-                  )}
-                  {item.error && (
-                    <p className="text-xs text-red-600">{item.error}</p>
-                  )}
-                </div>
-              </div>
-              <ResumeProcessingStatus status={item.processingStatus} />
-            </div>
-          );
-
-          if (item.processingStatus === 'COMPLETED' && item.candidateId) {
-            return (
-              <Link key={item.id} to={`/hr/resume/candidates/${item.candidateId}`}>
-                {inner}
-              </Link>
-            );
-          }
-          return <div key={item.id}>{inner}</div>;
-        })}
-      </div>
+    <div className="divide-y divide-gray-100">
+      {candidates.map((c) => (
+        <div key={c.id} className="flex items-center justify-between py-3 gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-gray-900 truncate">
+              {c.fullName || c.uploadedFile?.originalName || 'Без имени'}
+            </p>
+            <p className="text-xs text-gray-400">{formatDateTime(c.createdAt)}</p>
+            {c.processingError && (
+              <p className="text-xs text-red-500 mt-0.5 truncate" title={c.processingError}>
+                {c.processingError}
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <ResumeProcessingStatusBadge status={c.processingStatus} />
+            {c.processingStatus === ResumeProcessingStatus.FAILED && onRetry && (
+              <button
+                type="button"
+                onClick={() => onRetry(c.id)}
+                className="text-xs text-accent hover:underline"
+              >
+                Повторить
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

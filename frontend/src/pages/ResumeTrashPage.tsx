@@ -1,117 +1,146 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
-import { formatDate } from '../lib/resume-constants';
-import type { CandidateRow } from '../lib/resume-types';
+import type { ResumeCandidate } from '../lib/resume-types';
+import { formatDateTime } from '../lib/resume-constants';
 
 export default function ResumeTrashPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [candidates, setCandidates] = useState<CandidateRow[]>([]);
+  const [candidates, setCandidates] = useState<ResumeCandidate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const limit = 20;
 
-  const page = Number(searchParams.get('page')) || 1;
-  const search = searchParams.get('search') || '';
-  const pageSize = 20;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-
-  const loadCandidates = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params: Record<string, string | number> = { page, limit: pageSize, priority: 'DELETED' };
-      if (search) params.search = search;
-      const res = await api.get<{ candidates: CandidateRow[]; total: number }>('/resume/candidates', { params });
-      setCandidates(res.data.candidates);
+      const res = await api.get<{ data: ResumeCandidate[]; total: number }>('/resume/candidates', {
+        params: { priority: 'DELETED', page, limit },
+      });
+      setCandidates(res.data.data);
       setTotal(res.data.total);
-    } catch { /* */ } finally { setLoading(false); }
-  }, [page, search]);
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false);
+    }
+  }, [page]);
 
-  useEffect(() => { loadCandidates(); }, [loadCandidates]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  async function handleRestore(id: string) {
-    await api.put(`/resume/candidates/${id}`, { priority: 'ACTIVE' });
-    loadCandidates();
-  }
+  const restore = async (id: string) => {
+    try {
+      await api.patch(`/resume/candidates/${id}`, { priority: 'ACTIVE' });
+      load();
+    } catch {
+      /* ignore */
+    }
+  };
 
-  async function handlePermanentDelete(id: string) {
-    if (!confirm('Полностью удалить кандидата? Это действие необратимо.')) return;
-    await api.delete(`/resume/candidates/${id}`);
-    loadCandidates();
-  }
+  const hardDelete = async (id: string) => {
+    if (!confirm('Удалить кандидата безвозвратно?')) return;
+    try {
+      await api.delete(`/resume/candidates/${id}`);
+      load();
+    } catch {
+      /* ignore */
+    }
+  };
 
-  function goToPage(p: number) {
-    const params = new URLSearchParams(searchParams);
-    if (p <= 1) params.delete('page'); else params.set('page', String(p));
-    setSearchParams(params, { replace: true });
-  }
+  const totalPages = Math.ceil(total / limit);
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">Корзина</h1>
-        <p className="text-sm text-gray-500 mt-1">{total} {total === 1 ? 'кандидат' : 'кандидатов'} в корзине</p>
-      </div>
+      <h2 className="text-lg font-semibold text-gray-900">
+        Корзина <span className="text-sm font-normal text-gray-400">({total})</span>
+      </h2>
 
-      <div className="flex gap-2">
-        <input
-          type="text"
-          placeholder="Поиск по ФИО..."
-          value={search}
-          onChange={(e) => {
-            const params = new URLSearchParams(searchParams);
-            if (e.target.value) params.set('search', e.target.value); else params.delete('search');
-            params.delete('page');
-            setSearchParams(params, { replace: true });
-          }}
-          className="flex-1 max-w-md px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-        />
-      </div>
-
-      <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">ФИО</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Специализация</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Дата удаления</th>
-                <th className="px-4 py-3"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {loading ? (
-                <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-500">Загрузка...</td></tr>
-              ) : candidates.length === 0 ? (
-                <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-500">Корзина пуста</td></tr>
-              ) : candidates.map((c) => (
-                <tr key={c.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <Link to={`/hr/resume/candidates/${c.id}`} className="font-medium text-indigo-600 hover:text-indigo-800">{c.fullName}</Link>
-                  </td>
-                  <td className="px-4 py-3 text-gray-700">{c.specialization || '—'}</td>
-                  <td className="px-4 py-3 text-gray-500">{formatDate(c.createdAt)}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex gap-3">
-                      <button onClick={() => handleRestore(c.id)} className="text-xs text-indigo-600 hover:underline">Восстановить</button>
-                      <button onClick={() => handlePermanentDelete(c.id)} className="text-xs text-red-600 hover:underline">Удалить навсегда</button>
-                    </div>
-                  </td>
+      {loading ? (
+        <p className="text-sm text-gray-400">Загрузка...</p>
+      ) : candidates.length === 0 ? (
+        <p className="text-sm text-gray-400">Корзина пуста</p>
+      ) : (
+        <>
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50/80 border-b border-gray-200">
+                  <th className="text-left px-4 py-2 font-medium text-gray-600">ФИО</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-600">Специализация</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-600">Причина</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-600">Дата удаления</th>
+                  <th className="px-4 py-2" />
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {totalPages > 1 && (
-          <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-between">
-            <span className="text-sm text-gray-500">Стр. {page} из {totalPages}</span>
-            <div className="flex gap-1">
-              <button onClick={() => goToPage(page - 1)} disabled={page <= 1} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50">Назад</button>
-              <button onClick={() => goToPage(page + 1)} disabled={page >= totalPages} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50">Вперёд</button>
-            </div>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {candidates.map((c) => {
+                  const isDuplicate = (c.tags || []).some((t) => t.label === 'Дубликат');
+                  return (
+                    <tr key={c.id} className="hover:bg-gray-50/50">
+                      <td className="px-4 py-2">
+                        <Link to={`/hr/resume/candidates/${c.id}`} className="text-accent hover:underline">
+                          {c.fullName || '—'}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-2 text-gray-600">{c.specialization || '—'}</td>
+                      <td className="px-4 py-2">
+                        {isDuplicate ? (
+                          <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            Дубликат
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-400">Вручную</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-gray-400">{formatDateTime(c.updatedAt)}</td>
+                      <td className="px-4 py-2 text-right space-x-3">
+                        <button
+                          type="button"
+                          onClick={() => restore(c.id)}
+                          className="text-xs text-accent hover:underline"
+                        >
+                          Восстановить
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => hardDelete(c.id)}
+                          className="text-xs text-red-600 hover:underline"
+                        >
+                          Удалить
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        )}
-      </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2">
+              <button
+                disabled={page <= 1}
+                onClick={() => setPage(page - 1)}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg disabled:opacity-50 hover:bg-gray-50"
+              >
+                Назад
+              </button>
+              <span className="text-sm text-gray-500">
+                {page} / {totalPages}
+              </span>
+              <button
+                disabled={page >= totalPages}
+                onClick={() => setPage(page + 1)}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg disabled:opacity-50 hover:bg-gray-50"
+              >
+                Далее
+              </button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
