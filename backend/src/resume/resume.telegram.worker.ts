@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { Bot } from 'grammy';
 import { AppModule } from '../app.module';
@@ -157,6 +158,22 @@ async function bootstrap() {
     authorizedChats.add(chatId);
     await service.upsertTelegramChat({ chatId, username, firstName });
   }
+
+  // Periodic sync: remove chats revoked via UI, add chats added externally
+  setInterval(async () => {
+    try {
+      const chats = await service.listTelegramChats();
+      const dbChatIds = new Set(chats.map((c) => Number(c.chatId)));
+      for (const chatId of authorizedChats) {
+        if (!dbChatIds.has(chatId)) authorizedChats.delete(chatId);
+      }
+      for (const chatId of dbChatIds) {
+        authorizedChats.add(chatId);
+      }
+    } catch (err) {
+      console.error('Failed to sync authorized chats:', err);
+    }
+  }, 60_000);
 
   // -------------------------------------------------------------------------
   // /start command — reset auth state, ask for password

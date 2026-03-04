@@ -240,6 +240,7 @@ export default function ResumeApplyPublic() {
     try {
       await publicApi.post('/public/resume/apply/submit', {
         ...data,
+        email: data.email || undefined,
         uploadedFileId: uploadedFileId || undefined,
       });
       localStorage.removeItem(DRAFT_KEY);

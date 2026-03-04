@@ -7,8 +7,6 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
-  UnauthorizedException,
-  Headers,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -16,7 +14,6 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import * as multer from 'multer';
 import { ResumeService } from './resume.service';
 import { PublicApplySubmitDto } from './dto/public-apply-submit.dto';
-import { TelegramIngestDto } from './dto/telegram-ingest.dto';
 import {
   UploadRateLimitGuard,
   SubmitRateLimitGuard,
@@ -86,20 +83,4 @@ export class ResumePublicController {
     return this.resumeService.submitApplication(dto);
   }
 
-  /**
-   * Internal webhook for the Telegram bot worker to ingest processed files.
-   * Protected by a shared secret header (x-telegram-secret).
-   */
-  @Post('telegram/ingest')
-  @HttpCode(HttpStatus.OK)
-  async telegramIngest(
-    @Headers('x-telegram-secret') secret: string,
-    @Body() dto: TelegramIngestDto,
-  ) {
-    const expectedSecret = process.env.TELEGRAM_INGEST_SECRET;
-    if (!expectedSecret || secret !== expectedSecret) {
-      throw new UnauthorizedException('Invalid telegram secret');
-    }
-    return this.resumeService.telegramIngest(dto);
-  }
 }

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import HrTabs from '../HrTabs';
 
@@ -11,10 +12,13 @@ const sideLinks = [
 
 export default function ResumeLayout() {
   const applyUrl = `${window.location.origin}/resume/apply`;
+  const [copied, setCopied] = useState(false);
 
   const copyLink = async () => {
     try {
       await navigator.clipboard.writeText(applyUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     } catch {
       /* ignore */
     }
@@ -41,10 +45,14 @@ export default function ResumeLayout() {
             <button
               type="button"
               onClick={copyLink}
-              className="w-full text-left px-3 py-2 text-xs text-gray-500 hover:text-accent transition-colors rounded hover:bg-gray-50"
+              className={`w-full text-left px-3 py-2 text-xs transition-colors rounded ${
+                copied
+                  ? 'text-green-600 bg-green-50'
+                  : 'text-gray-500 hover:text-accent hover:bg-gray-50'
+              }`}
               title={applyUrl}
             >
-              Копировать ссылку для соискателей
+              {copied ? 'Ссылка скопирована!' : 'Копировать ссылку для соискателей'}
             </button>
           </div>
         </aside>

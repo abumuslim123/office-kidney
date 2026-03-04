@@ -725,7 +725,7 @@ export default function ResumeCandidatesPage() {
   const handleExport = async () => {
     setExporting(true);
     try {
-      const res = await api.get('/resume/export', { params: buildParams(), responseType: 'blob' });
+      const res = await api.get('/resume/candidates/export', { params: buildParams(), responseType: 'blob' });
       const url = URL.createObjectURL(res.data as Blob);
       const a = document.createElement('a');
       a.href = url;

@@ -51,7 +51,6 @@ import { CreateNoteDto } from './dto/create-note.dto';
 import { CreateTagDto } from './dto/create-tag.dto';
 import { UpdateCandidateDto } from './dto/update-candidate.dto';
 import { PublicApplySubmitDto } from './dto/public-apply-submit.dto';
-import { TelegramIngestDto } from './dto/telegram-ingest.dto';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -2355,6 +2354,7 @@ export class ResumeService {
         fullName: dto.fullName,
         email: dto.email || null,
         phone: dto.phone || null,
+        birthDate: parseDate(dto.birthDate),
         city: dto.city || null,
         branches: dto.branches || [],
         specialization: normalizedSpec,
@@ -2365,6 +2365,35 @@ export class ResumeService {
           ? ResumeProcessingStatus.PENDING
           : ResumeProcessingStatus.COMPLETED,
         aiConfidence: null,
+        // Образование (верхнеуровневые поля)
+        university: dto.university || null,
+        faculty: dto.faculty || null,
+        graduationYear: dto.graduationYear ?? null,
+        internshipPlace: dto.internshipPlace || null,
+        internshipSpecialty: dto.internshipSpecialty || null,
+        internshipYearEnd: dto.internshipYearEnd ?? null,
+        residencyPlace: dto.residencyPlace || null,
+        residencySpecialty: dto.residencySpecialty || null,
+        residencyYearEnd: dto.residencyYearEnd ?? null,
+        // Специализация / квалификация
+        additionalSpecializations: dto.additionalSpecializations || [],
+        qualificationCategory: (dto.qualificationCategory as any) || 'NONE',
+        categoryAssignedDate: parseDate(dto.categoryAssignedDate),
+        categoryExpiryDate: parseDate(dto.categoryExpiryDate),
+        accreditationStatus: dto.accreditationStatus || false,
+        accreditationDate: parseDate(dto.accreditationDate),
+        accreditationExpiryDate: parseDate(dto.accreditationExpiryDate),
+        certificateNumber: dto.certificateNumber || null,
+        certificateIssueDate: parseDate(dto.certificateIssueDate),
+        certificateExpiryDate: parseDate(dto.certificateExpiryDate),
+        // Опыт
+        totalExperienceYears: dto.totalExperienceYears ?? null,
+        specialtyExperienceYears: dto.specialtyExperienceYears ?? null,
+        // Дополнительно
+        nmoPoints: dto.nmoPoints ?? null,
+        publications: dto.publications || null,
+        languages: dto.languages || [],
+        additionalSkills: dto.additionalSkills || null,
       });
 
       const savedCandidate = await manager.save(
@@ -2407,6 +2436,22 @@ export class ResumeService {
         await manager.save(ResumeEducation, educationEntities);
       }
 
+      // Create CME course entries
+      if (dto.cmeCourses && dto.cmeCourses.length > 0) {
+        const cmeEntities = dto.cmeCourses.map((cme) =>
+          manager.create(ResumeCmeCourse, {
+            candidateId: savedCandidate.id,
+            courseName: cme.courseName,
+            provider: cme.provider || null,
+            completedAt: parseDate(cme.completedAt),
+            hours: cme.hours ?? null,
+            nmoPoints: cme.nmoPoints ?? null,
+            certificateNumber: cme.certificateNumber || null,
+          }),
+        );
+        await manager.save(ResumeCmeCourse, cmeEntities);
+      }
+
       return savedCandidate;
     });
 
@@ -2425,73 +2470,6 @@ export class ResumeService {
     return candidate;
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  Telegram Ingest
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Handle incoming resume from the Telegram bot.
-   * Decodes base64 file if present, saves to disk, creates candidate + file records.
-   */
-  async handleTelegramIngest(
-    dto: TelegramIngestDto,
-  ): Promise<ResumeCandidate> {
-    let uploadedFile: ResumeUploadedFile | null = null;
-
-    // If file is provided as base64, decode and save
-    if (dto.fileBase64 && dto.fileName && dto.mimeType) {
-      const uploadDir =
-        this.config.get<string>('RESUME_UPLOAD_DIR') || 'uploads/resume';
-      const absoluteUploadDir = join(process.cwd(), uploadDir);
-
-      await mkdir(absoluteUploadDir, { recursive: true });
-
-      const buffer = Buffer.from(dto.fileBase64, 'base64');
-      const sanitizedName = dto.fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const storedName = `${Date.now()}_${uuidv4()}_tg_${sanitizedName}`;
-      const storedPath = join(absoluteUploadDir, storedName);
-
-      await writeFile(storedPath, buffer);
-
-      uploadedFile = this.fileRepo.create({
-        originalName: dto.fileName,
-        storedPath,
-        mimeType: dto.mimeType,
-        sizeBytes: buffer.length,
-      });
-
-      uploadedFile = await this.fileRepo.save(uploadedFile);
-    }
-
-    // Ensure telegram chat record exists
-    const existingChat = await this.telegramChatRepo.findOne({
-      where: { chatId: String(dto.chatId) },
-    });
-
-    if (!existingChat) {
-      const chat = this.telegramChatRepo.create({
-        chatId: String(dto.chatId),
-        username: dto.username || null,
-        firstName: dto.firstName || null,
-      });
-      await this.telegramChatRepo.save(chat);
-    }
-
-    // Create candidate
-    const candidate = this.candidateRepo.create({
-      fullName: dto.firstName || dto.fileName || 'Telegram',
-      rawText: dto.rawText || null,
-      uploadedFileId: uploadedFile?.id || null,
-      processingStatus: ResumeProcessingStatus.PENDING,
-      branches: [],
-    });
-
-    const saved = await this.candidateRepo.save(candidate);
-
-    this.enqueueProcessing(saved.id);
-
-    return saved;
-  }
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  Deduplication
@@ -2610,13 +2588,6 @@ export class ResumeService {
     dto: PublicApplySubmitDto,
   ): Promise<ResumeCandidate> {
     return this.createCandidateFromPublicForm(dto);
-  }
-
-  /**
-   * Alias used by ResumePublicController.telegramIngest.
-   */
-  async telegramIngest(dto: TelegramIngestDto): Promise<ResumeCandidate> {
-    return this.handleTelegramIngest(dto);
   }
 
   /**
