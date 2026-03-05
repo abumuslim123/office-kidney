@@ -3,7 +3,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 /**
  * Преобразование doctorType (varchar, одно значение) → doctorTypes (text[], мультивыбор).
  */
-export class DoctorTypeToArray1741000006000 implements MigrationInterface {
+export class DoctorTypeToArray1741000006500 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Добавить новую колонку-массив
     await queryRunner.query(
