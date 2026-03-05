@@ -3,12 +3,11 @@ import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class ResumeFeatureGuard implements CanActivate {
-  constructor(private readonly config: ConfigService) {}
+  constructor(private config: ConfigService) {}
 
-  canActivate(_context: ExecutionContext): boolean {
-    const raw = this.config.get<string>('RESUME_MODULE_ENABLED');
-    const enabled = raw === undefined ? true : !['0', 'false', 'off'].includes(raw.toLowerCase());
-    if (!enabled) {
+  canActivate(context: ExecutionContext): boolean {
+    const enabled = this.config.get<string>('RESUME_MODULE_ENABLED');
+    if (enabled === 'false') {
       throw new NotFoundException('Resume module is disabled');
     }
     return true;

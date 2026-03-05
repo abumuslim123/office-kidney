@@ -1,16 +1,23 @@
-import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { ResumeCandidate } from './resume-candidate.entity';
 
 @Entity('resume_work_history')
-@Index('IDX_resume_work_history_candidateId', ['candidateId'])
+@Index(['candidateId'])
 export class ResumeWorkHistory {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ length: 300 })
+  @Column({ type: 'varchar', length: 500 })
   organization: string;
 
-  @Column({ length: 300 })
+  @Column({ type: 'varchar', length: 500 })
   position: string;
 
   @Column({ type: 'varchar', nullable: true })
@@ -34,7 +41,9 @@ export class ResumeWorkHistory {
   @Column({ type: 'uuid' })
   candidateId: string;
 
-  @ManyToOne(() => ResumeCandidate, (candidate) => candidate.workHistory, { onDelete: 'CASCADE' })
+  @ManyToOne(() => ResumeCandidate, (candidate) => candidate.workHistory, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'candidateId' })
   candidate: ResumeCandidate;
 }

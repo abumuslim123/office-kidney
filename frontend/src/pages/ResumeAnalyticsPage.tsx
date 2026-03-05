@@ -1,376 +1,390 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
-import { api } from '../lib/api';
-import { BRANCHES, formatDate } from '../lib/resume-constants';
-import type { AnalyticsData, PeriodPreset } from '../lib/resume-types';
+import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LabelList, Legend,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend,
   AreaChart, Area,
 } from 'recharts';
+import { api } from '../lib/api';
+import type { AnalyticsData } from '../lib/resume-types';
+import { BRANCHES, GENDER_PIE_COLORS, DOCTOR_TYPE_PIE_COLORS, formatDateTime } from '../lib/resume-constants';
 
-const PERIOD_PRESETS: { value: PeriodPreset; label: string }[] = [
-  { value: '7d', label: '7 дней' },
-  { value: '30d', label: '30 дней' },
-  { value: '90d', label: '90 дней' },
-  { value: 'year', label: 'Год' },
-  { value: 'all', label: 'Всё время' },
+const COLORS = ['#2563eb', '#7c3aed', '#059669', '#d97706', '#dc2626', '#0891b2', '#4f46e5', '#be185d'];
+const SCORE_BAR_COLORS: Record<string, string> = {
+  '0-19': '#ef4444',
+  '20-39': '#f97316',
+  '40-59': '#eab308',
+  '60-79': '#22c55e',
+  '80-100': '#10b981',
+};
+const PERIODS = [
+  { value: '7', label: '7 дней' },
+  { value: '30', label: '30 дней' },
+  { value: '90', label: '90 дней' },
+  { value: '365', label: 'Год' },
+  { value: '', label: 'Всё время' },
 ];
 
-const STATUS_COLORS: Record<string, { fill: string; name: string }> = {
-  NEW: { fill: '#94a3b8', name: 'Новый' },
-  REVIEWING: { fill: '#3b82f6', name: 'На рассмотрении' },
-  INVITED: { fill: '#8b5cf6', name: 'Приглашён' },
-  HIRED: { fill: '#22c55e', name: 'Принят' },
-};
-
-const CATEGORY_CHART_COLORS = ['#8b5cf6', '#3b82f6', '#22c55e', '#94a3b8'];
-
 export default function ResumeAnalyticsPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
-
-  const period = (searchParams.get('period') || 'all') as PeriodPreset;
-  const branch = searchParams.get('branch') || '';
-
-  const updateParam = useCallback((key: string, value: string) => {
-    const params = new URLSearchParams(searchParams);
-    if (value) params.set(key, value); else params.delete(key);
-    setSearchParams(params, { replace: true });
-  }, [searchParams, setSearchParams]);
+  const [period, setPeriod] = useState('30');
+  const [branch, setBranch] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const params: Record<string, string> = {};
-      if (period !== 'all') params.period = period;
+      if (period) params.days = period;
       if (branch) params.branch = branch;
       const res = await api.get<AnalyticsData>('/resume/analytics', { params });
       setData(res.data);
-    } catch { setData(null); } finally { setLoading(false); }
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false);
+    }
   }, [period, branch]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const totalConversion = useMemo(() => {
-    if (!data) return 0;
-    const hiredStage = data.funnel.find((s) => s.name === 'Приняты');
-    const totalStage = data.funnel[0];
-    return hiredStage && totalStage && totalStage.value > 0
-      ? Math.round((hiredStage.value / totalStage.value) * 100) : 0;
-  }, [data]);
-
-  if (loading) return <div className="flex items-center justify-center py-20 text-gray-500">Загрузка аналитики...</div>;
-  if (!data) return <div className="text-center py-20 text-gray-500">Не удалось загрузить данные</div>;
+  if (loading) return <p className="text-sm text-gray-400">Загрузка аналитики...</p>;
+  if (!data) return <p className="text-sm text-red-600">Ошибка загрузки</p>;
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">Аналитика</h1>
-        <p className="text-sm text-gray-500 mt-1">Обзор базы кандидатов и ключевые метрики</p>
-      </div>
-
-      {/* Filters bar */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex gap-1">
-          {PERIOD_PRESETS.map((p) => (
-            <button
-              key={p.value}
-              onClick={() => updateParam('period', p.value === 'all' ? '' : p.value)}
-              className={`px-3 py-1.5 text-sm rounded-md ${period === p.value ? 'bg-indigo-600 text-white' : 'border border-gray-300 hover:bg-gray-50'}`}
-            >
-              {p.label}
-            </button>
-          ))}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <h2 className="text-lg font-semibold text-gray-900">Аналитика</h2>
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-gray-300 overflow-hidden">
+            {PERIODS.map((p) => (
+              <button
+                key={p.value}
+                type="button"
+                onClick={() => setPeriod(p.value)}
+                className={`px-3 py-1.5 text-sm transition-colors ${
+                  period === p.value ? 'bg-accent text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <select
+            value={branch}
+            onChange={(e) => setBranch(e.target.value)}
+            className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
+          >
+            <option value="">Все филиалы</option>
+            {BRANCHES.map((b) => (
+              <option key={b} value={b}>{b}</option>
+            ))}
+          </select>
         </div>
-        <select
-          value={branch || 'all'}
-          onChange={(e) => updateParam('branch', e.target.value === 'all' ? '' : e.target.value)}
-          className="px-3 py-2 text-sm border border-gray-300 rounded-md"
-        >
-          <option value="all">Все филиалы</option>
-          {BRANCHES.map((b) => (<option key={b} value={b}>{b}</option>))}
-        </select>
-        {(period !== 'all' || branch) && (
-          <button onClick={() => setSearchParams({})} className="text-sm text-gray-500 hover:text-gray-700">Сбросить</button>
-        )}
       </div>
 
       {/* KPI Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {data.kpis.map((metric) => {
-          const trend = getTrend(metric);
-          return (
-            <div key={metric.key} className="rounded-lg border border-gray-200 bg-white p-5">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-medium text-gray-500">{metric.title}</p>
-              </div>
-              <p className="text-2xl font-bold text-gray-900">{formatKpiValue(metric)}</p>
-              {trend !== null && (
-                <p className={`mt-1 text-xs ${trend.isPositive ? 'text-green-600' : 'text-red-600'}`}>
-                  {trend.change > 0 ? '+' : ''}{trend.change}% vs пред. период
-                </p>
-              )}
-            </div>
-          );
-        })}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {data.kpis.map((kpi) => (
+          <div key={kpi.key} className="bg-white border border-gray-200 rounded-xl p-4">
+            <p className="text-xs text-gray-400 mb-1">{kpi.title}</p>
+            <p className="text-2xl font-semibold text-gray-900">
+              {kpi.format === 'percent'
+                ? `${Math.round(kpi.value)}%`
+                : kpi.format === 'decimal'
+                  ? kpi.value.toFixed(1)
+                  : kpi.format === 'fraction'
+                    ? `${kpi.value}/${kpi.fractionTotal || 0}`
+                    : kpi.value}
+            </p>
+            {kpi.previousValue != null && (
+              <p className={`text-xs mt-1 ${
+                kpi.trendDirection === 'up-good'
+                  ? kpi.value >= kpi.previousValue ? 'text-green-600' : 'text-red-600'
+                  : kpi.trendDirection === 'up-bad'
+                    ? kpi.value >= kpi.previousValue ? 'text-red-600' : 'text-green-600'
+                    : 'text-gray-400'
+              }`}>
+                {kpi.value >= kpi.previousValue ? '+' : ''}{kpi.value - kpi.previousValue}
+                {' от прошлого периода'}
+              </p>
+            )}
+          </div>
+        ))}
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* Timeline */}
-        <ChartCard title="Динамика добавления">
-          {data.timeline.every((d) => d.count === 0) ? <EmptyChart /> : (
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={data.timeline}>
-                <defs>
-                  <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(value) => [`${value} кандидатов`, '']} />
-                <Area type="monotone" dataKey="count" stroke="#8b5cf6" fillOpacity={1} fill="url(#colorCount)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          )}
+      {/* Timeline Chart */}
+      {data.timeline.length > 0 && (
+        <ChartCard title="Динамика поступления резюме">
+          <ResponsiveContainer width="100%" height={250}>
+            <AreaChart data={data.timeline}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+              <YAxis tick={{ fontSize: 12 }} />
+              <Tooltip />
+              <Area type="monotone" dataKey="count" stroke="#2563eb" fill="#2563eb" fillOpacity={0.1} name="Резюме" />
+            </AreaChart>
+          </ResponsiveContainer>
         </ChartCard>
+      )}
 
+      <div className="grid lg:grid-cols-2 gap-6">
         {/* Funnel */}
-        <ChartCard title="Воронка рекрутинга" badge={`Конверсия: ${totalConversion}%`}>
-          {data.funnel.every((d) => d.value === 0) ? <EmptyChart /> : (
-            <>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={data.funnel} layout="vertical">
-                  <XAxis type="number" tick={{ fontSize: 11 }} />
-                  <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(value) => [`${value} кандидатов`, '']} />
-                <Bar dataKey="value" radius={[0, 4, 4, 0]}>
-                    {data.funnel.map((entry, index) => (<Cell key={index} fill={entry.color} />))}
-                    <LabelList dataKey="value" position="right" style={{ fontSize: 11 }} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-              <div className="mt-3 flex flex-wrap gap-3 text-xs">
-                {data.funnel.filter((d) => d.conversionFromPrevious !== null).map((d) => (
-                  <span key={d.name} className="text-gray-500">
-                    {d.name}: <span className={`font-medium ${d.conversionFromPrevious! >= 50 ? 'text-green-600' : d.conversionFromPrevious! >= 20 ? 'text-yellow-600' : 'text-red-600'}`}>
-                      {d.conversionFromPrevious}%
-                    </span>
-                  </span>
-                ))}
-              </div>
-            </>
-          )}
-        </ChartCard>
-      </div>
+        {data.funnel.length > 0 && (
+          <ChartCard title="Воронка">
+            <div className="space-y-2">
+              {data.funnel.map((stage, i) => (
+                <div key={stage.name}>
+                  <div className="flex items-center justify-between text-sm mb-1">
+                    <span className="text-gray-700">{stage.name}</span>
+                    <span className="font-medium">{stage.value}</span>
+                  </div>
+                  <div className="h-6 bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{
+                        width: `${data.funnel[0].value ? (stage.value / data.funnel[0].value) * 100 : 0}%`,
+                        backgroundColor: stage.color || COLORS[i % COLORS.length],
+                      }}
+                    />
+                  </div>
+                  {stage.conversionFromPrevious != null && i > 0 && (
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Конверсия: {Math.round(stage.conversionFromPrevious)}%
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </ChartCard>
+        )}
 
-      <div className="grid gap-6 md:grid-cols-2">
         {/* Specializations */}
-        <ChartCard title="По специализациям">
-          {data.specializations.length === 0 ? <EmptyChart /> : (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={data.specializations} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis type="number" tick={{ fontSize: 11 }} />
-                <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 10 }} />
+        {data.specializations.length > 0 && (
+          <ChartCard title="По специализациям">
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={data.specializations.slice(0, 10)} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis type="number" tick={{ fontSize: 12 }} />
+                <YAxis dataKey="name" type="category" width={150} tick={{ fontSize: 11 }} />
                 <Tooltip />
-                <Bar dataKey="count" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
+                <Bar dataKey="count" fill="#2563eb" radius={[0, 4, 4, 0]} name="Кандидатов" />
               </BarChart>
             </ResponsiveContainer>
-          )}
-        </ChartCard>
+          </ChartCard>
+        )}
 
         {/* Categories */}
-        <ChartCard title="По категориям">
-          {data.categories.length === 0 ? <EmptyChart /> : (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={data.categories.map((d) => ({ ...d, label: `${d.count} (${d.percentage}%)` }))}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(value, _name, props) => {
-                  const pct = (props as unknown as { payload: { percentage: number } }).payload?.percentage ?? 0;
-                  return [`${value} (${pct}%)`, 'Кандидатов'];
-                }} />
-                <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                  {data.categories.map((_, index) => (<Cell key={index} fill={CATEGORY_CHART_COLORS[index % CATEGORY_CHART_COLORS.length]} />))}
-                  <LabelList dataKey="label" position="top" style={{ fontSize: 10 }} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </ChartCard>
-      </div>
-
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* Branch distribution */}
-        <ChartCard title="По филиалам">
-          {data.branchDistribution.every((d) => d.total === 0) ? <EmptyChart /> : (
-            <ResponsiveContainer width="100%" height={350}>
-              <BarChart data={data.branchDistribution}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="branch" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
-                {Object.entries(STATUS_COLORS).map(([key, { fill, name }]) => (
-                  <Bar key={key} dataKey={key} stackId="a" fill={fill} name={name} />
-                ))}
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </ChartCard>
-
-        {/* Tags */}
-        <ChartCard title="Популярные теги">
-          {data.topTags.length === 0 ? <EmptyChart text="Теги ещё не добавлены" /> : (
-            <ResponsiveContainer width="100%" height={Math.max(data.topTags.length * 35, 150)}>
-              <BarChart data={data.topTags.map((t) => ({ name: t.label, count: t.count, color: t.color }))} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis type="number" tick={{ fontSize: 11 }} />
-                <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 10 }} />
-                <Tooltip formatter={(value) => [`${value} кандидатов`, '']} />
-                <Bar dataKey="count" radius={[0, 4, 4, 0]}>
-                  {data.topTags.map((entry, index) => (<Cell key={index} fill={entry.color || '#6366f1'} />))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </ChartCard>
-      </div>
-
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* Experience */}
-        <ChartCard title="По стажу работы (лет)">
-          {data.experienceBuckets.every((d) => d.count === 0) ? <EmptyChart /> : (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={data.experienceBuckets}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </ChartCard>
-
-        {/* Branch coverage matrix */}
-        <ChartCard title="Покрытие специализаций">
-          {data.branchCoverage.every((r) => r.total === 0) ? <EmptyChart /> : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr>
-                    <th className="text-left py-2 pr-2 font-medium text-gray-500 sticky left-0 bg-white">Специализация</th>
-                    {BRANCHES.map((b) => (<th key={b} className="text-center px-2 py-2 font-medium text-gray-500 whitespace-nowrap">{b}</th>))}
-                    <th className="text-center px-2 py-2 font-bold text-gray-700">Итого</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.branchCoverage.filter((r) => r.total > 0).map((row) => (
-                    <tr key={row.specialization} className="border-t border-gray-100">
-                      <td className="py-1.5 pr-2 font-medium text-gray-700 sticky left-0 bg-white">{row.specialization}</td>
-                      {BRANCHES.map((b) => {
-                        const count = row.branches[b] || 0;
-                        const cls = count === 0 ? 'bg-red-50 text-red-600' : count === 1 ? 'bg-yellow-50 text-yellow-700' : 'bg-green-50 text-green-700';
-                        return <td key={b} className={`text-center px-2 py-1.5 font-medium ${cls}`}>{count}</td>;
-                      })}
-                      <td className="text-center px-2 py-1.5 font-bold text-gray-900">{row.total}</td>
-                    </tr>
+        {data.categories.length > 0 && (
+          <ChartCard title="Квалификационные категории">
+            <ResponsiveContainer width="100%" height={250}>
+              <PieChart>
+                <Pie
+                  data={data.categories}
+                  dataKey="count"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={90}
+                  label={(props: any) => `${props.name} (${Math.round(props.percent * 100)}%)`}
+                >
+                  {data.categories.map((_, i) => (
+                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
                   ))}
-                </tbody>
-              </table>
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        )}
+
+        {/* Gender distribution */}
+        {data.genderDistribution && data.genderDistribution.length > 0 && (
+          <ChartCard title="Распределение по полу">
+            <ResponsiveContainer width="100%" height={250}>
+              <PieChart>
+                <Pie
+                  data={data.genderDistribution}
+                  dataKey="count"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={90}
+                  label={(props: any) => `${props.name} (${Math.round(props.percent * 100)}%)`}
+                >
+                  {data.genderDistribution.map((entry) => (
+                    <Cell key={entry.key} fill={GENDER_PIE_COLORS[entry.key] || '#9ca3af'} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(value: number) => [value, 'Кандидатов']} />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        )}
+
+        {/* Doctor type distribution */}
+        {data.doctorTypeDistribution && data.doctorTypeDistribution.length > 0 && (
+          <ChartCard title="Направление врача">
+            <ResponsiveContainer width="100%" height={250}>
+              <PieChart>
+                <Pie
+                  data={data.doctorTypeDistribution}
+                  dataKey="count"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={90}
+                  label={(props: any) => `${props.name} (${Math.round(props.percent * 100)}%)`}
+                >
+                  {data.doctorTypeDistribution.map((entry) => (
+                    <Cell key={entry.key} fill={DOCTOR_TYPE_PIE_COLORS[entry.key] || '#9ca3af'} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(value: any) => [value, 'Кандидатов']} />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        )}
+
+        {/* Experience */}
+        {data.experienceBuckets.length > 0 && (
+          <ChartCard title="Опыт работы">
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={data.experienceBuckets}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip />
+                <Bar dataKey="count" fill="#7c3aed" radius={[4, 4, 0, 0]} name="Кандидатов" />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        )}
+
+        {/* AI Score distribution */}
+        {data.scoreDistribution && data.scoreDistribution.some((b) => b.count > 0) && (
+          <ChartCard title="Распределение AI-оценок">
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={data.scoreDistribution}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip />
+                <Bar dataKey="count" radius={[4, 4, 0, 0]} name="Кандидатов">
+                  {data.scoreDistribution.map((entry) => (
+                    <Cell key={entry.name} fill={SCORE_BAR_COLORS[entry.name] || '#6b7280'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        )}
+
+        {/* Branch distribution */}
+        {data.branchDistribution.length > 0 && (
+          <ChartCard title="По филиалам">
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={data.branchDistribution}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="branch" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="NEW" stackId="a" fill="#9ca3af" name="Новый" />
+                <Bar dataKey="REVIEWING" stackId="a" fill="#3b82f6" name="На рассмотрении" />
+                <Bar dataKey="INVITED" stackId="a" fill="#8b5cf6" name="Приглашён" />
+                <Bar dataKey="HIRED" stackId="a" fill="#10b981" name="Принят" />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        )}
+
+        {/* Top tags */}
+        {data.topTags.length > 0 && (
+          <ChartCard title="Популярные теги">
+            <div className="space-y-2">
+              {data.topTags.map((tag) => (
+                <div key={tag.label} className="flex items-center gap-3">
+                  <span
+                    className="w-3 h-3 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: tag.color || '#6b7280' }}
+                  />
+                  <span className="text-sm text-gray-700 flex-1">{tag.label}</span>
+                  <span className="text-sm font-medium text-gray-900">{tag.count}</span>
+                </div>
+              ))}
             </div>
-          )}
-        </ChartCard>
+          </ChartCard>
+        )}
       </div>
 
-      {/* Expiring accreditations */}
-      {data.expiringAccreditations.length > 0 && (
-        <div className="rounded-lg border border-gray-200 bg-white">
-          <div className="px-5 py-3 border-b border-gray-200 flex items-center gap-2">
-            <svg className="h-5 w-5 text-yellow-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-            </svg>
-            <h3 className="text-sm font-semibold text-gray-900">Истекающая аккредитация (90 дней)</h3>
-          </div>
+      {/* Branch coverage matrix */}
+      {data.branchCoverage.length > 0 && (
+        <ChartCard title="Покрытие специализаций по филиалам">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">ФИО</th>
-                  <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Специализация</th>
-                  <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Дата истечения</th>
-                  <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Дней осталось</th>
+              <thead>
+                <tr className="border-b border-gray-200">
+                  <th className="text-left px-3 py-2 font-medium text-gray-600">Специализация</th>
+                  {BRANCHES.map((b) => (
+                    <th key={b} className="text-center px-3 py-2 font-medium text-gray-600">{b}</th>
+                  ))}
+                  <th className="text-center px-3 py-2 font-medium text-gray-600">Итого</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {data.expiringAccreditations.map((c) => {
-                  const daysRemaining = c.accreditationExpiryDate
-                    ? Math.ceil((new Date(c.accreditationExpiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-                    : null;
-                  const isUrgent = daysRemaining !== null && daysRemaining <= 30;
-                  return (
-                    <tr key={c.id}>
-                      <td className="px-4 py-2">
-                        <Link to={`/hr/resume/candidates/${c.id}`} className="text-indigo-600 hover:underline">{c.fullName}</Link>
-                      </td>
-                      <td className="px-4 py-2 text-gray-600">{c.specialization || '—'}</td>
-                      <td className="px-4 py-2 text-gray-600">{formatDate(c.accreditationExpiryDate)}</td>
-                      <td className="px-4 py-2">
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${isUrgent ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>
-                          {daysRemaining} дн.
+                {data.branchCoverage.map((row) => (
+                  <tr key={row.specialization}>
+                    <td className="px-3 py-2 text-gray-700">{row.specialization}</td>
+                    {BRANCHES.map((b) => (
+                      <td key={b} className="text-center px-3 py-2">
+                        <span className={`inline-block min-w-[24px] text-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
+                          (row.branches[b] || 0) > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-400'
+                        }`}>
+                          {row.branches[b] || 0}
                         </span>
                       </td>
-                    </tr>
-                  );
-                })}
+                    ))}
+                    <td className="text-center px-3 py-2 font-medium">{row.total}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
-        </div>
+        </ChartCard>
+      )}
+
+      {/* Expiring accreditations */}
+      {data.expiringAccreditations.length > 0 && (
+        <ChartCard title="Истекающие аккредитации">
+          <div className="space-y-2">
+            {data.expiringAccreditations.map((item) => (
+              <div key={item.id} className="flex items-center justify-between py-1">
+                <Link to={`/hr/resume/candidates/${item.id}`} className="text-sm text-accent hover:underline">
+                  {item.fullName}
+                </Link>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-gray-500">{item.specialization || '—'}</span>
+                  <span className="text-xs text-red-600 font-medium">
+                    {formatDateTime(item.accreditationExpiryDate)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </ChartCard>
       )}
     </div>
   );
 }
 
-function ChartCard({ title, badge, children }: { title: string; badge?: string; children: React.ReactNode }) {
+function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-5">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
-        {badge && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">{badge}</span>}
-      </div>
+    <div className="bg-white border border-gray-200 rounded-xl p-4">
+      <h3 className="text-sm font-semibold text-gray-900 mb-4">{title}</h3>
       {children}
     </div>
   );
-}
-
-function EmptyChart({ text = 'Нет данных' }: { text?: string }) {
-  return <p className="text-gray-400 text-center py-8 text-sm">{text}</p>;
-}
-
-function formatKpiValue(metric: { value: number; format: string; fractionTotal?: number }): string {
-  switch (metric.format) {
-    case 'percent': return `${metric.value}%`;
-    case 'decimal': return metric.value.toFixed(1);
-    case 'fraction': return metric.fractionTotal != null ? `${metric.value} / ${metric.fractionTotal}` : String(metric.value);
-    default: return String(metric.value);
-  }
-}
-
-function getTrend(metric: { value: number; previousValue: number | null; trendDirection: string }): { change: number; isPositive: boolean } | null {
-  if (metric.previousValue === null || metric.previousValue === 0) return null;
-  const change = Math.round(((metric.value - metric.previousValue) / metric.previousValue) * 100);
-  if (change === 0) return { change: 0, isPositive: true };
-  const isIncreasing = change > 0;
-  let isPositive: boolean;
-  if (metric.trendDirection === 'up-good') isPositive = isIncreasing;
-  else if (metric.trendDirection === 'up-bad') isPositive = !isIncreasing;
-  else isPositive = true;
-  return { change, isPositive };
 }

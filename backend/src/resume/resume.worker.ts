@@ -3,33 +3,32 @@ import { AppModule } from '../app.module';
 import { ResumeService } from './resume.service';
 
 async function bootstrap() {
-  const isEnabled = (process.env.RESUME_MODULE_ENABLED || 'true').toLowerCase();
-  if (['0', 'false', 'off'].includes(isEnabled)) {
-    console.log('[resume-worker] skipped because RESUME_MODULE_ENABLED=false');
-    return;
-  }
-
   const app = await NestFactory.createApplicationContext(AppModule);
-  const resumeService = app.get(ResumeService);
-  const intervalMs = Math.max(1000, parseInt(process.env.RESUME_WORKER_INTERVAL_MS || '10000', 10));
-  const batchSize = Math.max(1, Math.min(100, parseInt(process.env.RESUME_WORKER_BATCH_SIZE || '20', 10)));
+  const service = app.get(ResumeService);
+  const intervalMs = parseInt(
+    process.env.RESUME_WORKER_INTERVAL_MS || '10000',
+    10,
+  );
+  const batchSize = parseInt(
+    process.env.RESUME_WORKER_BATCH_SIZE || '20',
+    10,
+  );
 
-  console.log(`[resume-worker] started: interval=${intervalMs}ms batch=${batchSize}`);
+  console.log(
+    `Resume worker started (interval: ${intervalMs}ms, batch: ${batchSize})`,
+  );
 
   while (true) {
     try {
-      const processed = await resumeService.processPendingCandidates(batchSize);
+      const processed = await service.processPendingCandidates(batchSize);
       if (processed > 0) {
-        console.log(`[resume-worker] processed candidates: ${processed}`);
+        console.log(`Processed ${processed} candidates`);
       }
     } catch (error) {
-      console.error('[resume-worker] iteration error:', error);
+      console.error('Worker error:', error);
     }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    await new Promise((r) => setTimeout(r, intervalMs));
   }
 }
 
-bootstrap().catch((error) => {
-  console.error('[resume-worker] fatal error:', error);
-  process.exit(1);
-});
+bootstrap().catch(console.error);

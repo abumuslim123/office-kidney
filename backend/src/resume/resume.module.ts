@@ -2,9 +2,6 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MulterModule } from '@nestjs/platform-express';
 import * as multer from 'multer';
-import { ResumeController } from './resume.controller';
-import { ResumePublicController } from './resume-public.controller';
-import { ResumeService } from './resume.service';
 import { ResumeCandidate } from './entities/resume-candidate.entity';
 import { ResumeUploadedFile } from './entities/resume-uploaded-file.entity';
 import { ResumeWorkHistory } from './entities/resume-work-history.entity';
@@ -13,7 +10,12 @@ import { ResumeCmeCourse } from './entities/resume-cme-course.entity';
 import { ResumeCandidateNote } from './entities/resume-candidate-note.entity';
 import { ResumeCandidateTag } from './entities/resume-candidate-tag.entity';
 import { ResumeTelegramChat } from './entities/resume-telegram-chat.entity';
-import { ResumeFeatureGuard } from './guards/resume-feature.guard';
+import { ResumeSpecialization } from './entities/resume-specialization.entity';
+import { ResumeCandidateScore } from './entities/resume-candidate-score.entity';
+import { ResumeService } from './resume.service';
+import { ResumeDuplicateDetectionService } from './resume-duplicate-detection.service';
+import { ResumeController } from './resume.controller';
+import { ResumePublicController } from './resume-public.controller';
 
 @Module({
   imports: [
@@ -26,11 +28,13 @@ import { ResumeFeatureGuard } from './guards/resume-feature.guard';
       ResumeCandidateNote,
       ResumeCandidateTag,
       ResumeTelegramChat,
+      ResumeSpecialization,
+      ResumeCandidateScore,
     ]),
     MulterModule.register({ storage: multer.memoryStorage() }),
   ],
   controllers: [ResumeController, ResumePublicController],
-  providers: [ResumeService, ResumeFeatureGuard],
+  providers: [ResumeService, ResumeDuplicateDetectionService],
   exports: [ResumeService],
 })
 export class ResumeModule {}

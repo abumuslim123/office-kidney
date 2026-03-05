@@ -1,89 +1,164 @@
 import {
-  IsArray,
-  IsBoolean,
-  IsEnum,
-  IsNumber,
-  IsOptional,
   IsString,
-  MaxLength,
+  IsOptional,
+  IsEnum,
+  IsBoolean,
+  IsInt,
+  IsNumber,
+  IsArray,
+  MinLength,
 } from 'class-validator';
 import {
-  ResumeCandidatePriority,
-  ResumeCandidateStatus,
   ResumeQualificationCategory,
+  ResumeCandidateStatus,
+  ResumeCandidatePriority,
+  ResumeCandidateGender,
+  ResumeCandidateDoctorType,
 } from '../entities/resume.enums';
 
 export class UpdateCandidateDto {
-  @IsOptional()
   @IsString()
-  @MaxLength(300)
+  @MinLength(1)
+  @IsOptional()
   fullName?: string;
 
-  @IsOptional()
   @IsString()
-  @MaxLength(255)
-  email?: string | null;
-
   @IsOptional()
+  email?: string;
+
   @IsString()
-  @MaxLength(255)
-  phone?: string | null;
-
   @IsOptional()
+  phone?: string;
+
   @IsString()
-  @MaxLength(255)
-  city?: string | null;
-
   @IsOptional()
+  city?: string;
+
   @IsString()
-  @MaxLength(255)
-  specialization?: string | null;
-
   @IsOptional()
+  university?: string;
+
+  @IsString()
+  @IsOptional()
+  faculty?: string;
+
+  @IsInt()
+  @IsOptional()
+  graduationYear?: number;
+
+  @IsString()
+  @IsOptional()
+  internshipPlace?: string;
+
+  @IsString()
+  @IsOptional()
+  internshipSpecialty?: string;
+
+  @IsInt()
+  @IsOptional()
+  internshipYearEnd?: number;
+
+  @IsString()
+  @IsOptional()
+  residencyPlace?: string;
+
+  @IsString()
+  @IsOptional()
+  residencySpecialty?: string;
+
+  @IsInt()
+  @IsOptional()
+  residencyYearEnd?: number;
+
+  @IsString()
+  @IsOptional()
+  specialization?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  additionalSpecializations?: string[];
+
   @IsEnum(ResumeQualificationCategory)
+  @IsOptional()
   qualificationCategory?: ResumeQualificationCategory;
 
-  @IsOptional()
-  @IsEnum(ResumeCandidateStatus)
-  status?: ResumeCandidateStatus;
-
-  @IsOptional()
-  @IsEnum(ResumeCandidatePriority)
-  priority?: ResumeCandidatePriority;
-
-  @IsOptional()
-  @IsArray()
-  branches?: string[];
-
-  @IsOptional()
   @IsString()
-  rawText?: string | null;
-
   @IsOptional()
+  categoryAssignedDate?: string;
+
   @IsString()
-  publications?: string | null;
-
   @IsOptional()
-  @IsString()
-  additionalSkills?: string | null;
+  categoryExpiryDate?: string;
 
-  @IsOptional()
-  @IsNumber()
-  nmoPoints?: number | null;
-
-  @IsOptional()
-  @IsNumber()
-  totalExperienceYears?: number | null;
-
-  @IsOptional()
-  @IsNumber()
-  specialtyExperienceYears?: number | null;
-
-  @IsOptional()
   @IsBoolean()
+  @IsOptional()
   accreditationStatus?: boolean;
 
-  @IsOptional()
   @IsString()
-  accreditationExpiryDate?: string | null;
+  @IsOptional()
+  accreditationDate?: string;
+
+  @IsString()
+  @IsOptional()
+  accreditationExpiryDate?: string;
+
+  @IsString()
+  @IsOptional()
+  certificateNumber?: string;
+
+  @IsString()
+  @IsOptional()
+  certificateIssueDate?: string;
+
+  @IsString()
+  @IsOptional()
+  certificateExpiryDate?: string;
+
+  @IsNumber()
+  @IsOptional()
+  totalExperienceYears?: number;
+
+  @IsNumber()
+  @IsOptional()
+  specialtyExperienceYears?: number;
+
+  @IsInt()
+  @IsOptional()
+  nmoPoints?: number;
+
+  @IsString()
+  @IsOptional()
+  publications?: string;
+
+  @IsString()
+  @IsOptional()
+  additionalSkills?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  languages?: string[];
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  branches?: string[];
+
+  @IsEnum(ResumeCandidateStatus)
+  @IsOptional()
+  status?: ResumeCandidateStatus;
+
+  @IsEnum(ResumeCandidatePriority)
+  @IsOptional()
+  priority?: ResumeCandidatePriority;
+
+  @IsEnum(ResumeCandidateGender)
+  @IsOptional()
+  gender?: ResumeCandidateGender;
+
+  @IsArray()
+  @IsEnum(ResumeCandidateDoctorType, { each: true })
+  @IsOptional()
+  doctorTypes?: ResumeCandidateDoctorType[];
 }

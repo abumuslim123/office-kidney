@@ -18,6 +18,8 @@ export enum ResumeCandidateStatus {
   REVIEWING = 'REVIEWING',
   INVITED = 'INVITED',
   HIRED = 'HIRED',
+  RESERVE = 'RESERVE',
+  REJECTED = 'REJECTED',
 }
 
 export enum ResumeCandidatePriority {
@@ -26,4 +28,16 @@ export enum ResumeCandidatePriority {
   NOT_SUITABLE = 'NOT_SUITABLE',
   ARCHIVE = 'ARCHIVE',
   DELETED = 'DELETED',
+}
+
+export enum ResumeCandidateGender {
+  MALE = 'MALE',
+  FEMALE = 'FEMALE',
+  UNKNOWN = 'UNKNOWN',
+}
+
+export enum ResumeCandidateDoctorType {
+  PEDIATRIC = 'PEDIATRIC',
+  THERAPIST = 'THERAPIST',
+  FAMILY = 'FAMILY',
 }

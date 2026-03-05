@@ -1,4 +1,57 @@
-export interface WorkHistoryEntry {
+export enum ResumeProcessingStatus {
+  PENDING = 'PENDING',
+  EXTRACTING = 'EXTRACTING',
+  PARSING = 'PARSING',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+}
+
+export enum ResumeQualificationCategory {
+  HIGHEST = 'HIGHEST',
+  FIRST = 'FIRST',
+  SECOND = 'SECOND',
+  NONE = 'NONE',
+}
+
+export enum ResumeCandidateStatus {
+  NEW = 'NEW',
+  REVIEWING = 'REVIEWING',
+  INVITED = 'INVITED',
+  HIRED = 'HIRED',
+  RESERVE = 'RESERVE',
+  REJECTED = 'REJECTED',
+}
+
+export enum ResumeCandidatePriority {
+  ACTIVE = 'ACTIVE',
+  RESERVE = 'RESERVE',
+  NOT_SUITABLE = 'NOT_SUITABLE',
+  ARCHIVE = 'ARCHIVE',
+  DELETED = 'DELETED',
+}
+
+export enum ResumeCandidateGender {
+  MALE = 'MALE',
+  FEMALE = 'FEMALE',
+  UNKNOWN = 'UNKNOWN',
+}
+
+export enum ResumeCandidateDoctorType {
+  PEDIATRIC = 'PEDIATRIC',
+  THERAPIST = 'THERAPIST',
+  FAMILY = 'FAMILY',
+}
+
+export interface ResumeUploadedFile {
+  id: string;
+  createdAt: string;
+  originalName: string;
+  storedPath: string;
+  mimeType: string;
+  sizeBytes: number;
+}
+
+export interface ResumeWorkHistory {
   id: string;
   organization: string;
   position: string;
@@ -8,9 +61,10 @@ export interface WorkHistoryEntry {
   endDate: string | null;
   isCurrent: boolean;
   description: string | null;
+  candidateId: string;
 }
 
-export interface EducationEntry {
+export interface ResumeEducation {
   id: string;
   institution: string;
   faculty: string | null;
@@ -20,9 +74,10 @@ export interface EducationEntry {
   startYear: number | null;
   endYear: number | null;
   type: string | null;
+  candidateId: string;
 }
 
-export interface CmeCourseEntry {
+export interface ResumeCmeCourse {
   id: string;
   courseName: string;
   provider: string | null;
@@ -30,49 +85,35 @@ export interface CmeCourseEntry {
   hours: number | null;
   nmoPoints: number | null;
   certificateNumber: string | null;
+  candidateId: string;
 }
 
-export interface NoteEntry {
+export interface ResumeCandidateNote {
   id: string;
+  createdAt: string;
+  updatedAt: string;
   content: string;
   authorName: string;
-  createdAt: string;
+  candidateId: string;
 }
 
-export interface TagEntry {
+export interface ResumeCandidateTag {
   id: string;
   label: string;
   color: string | null;
+  candidateId: string;
 }
 
-export interface UploadedFileRef {
-  id: string;
-  originalName: string;
-  mimeType: string;
-}
-
-export interface CandidateRow {
+export interface ResumeCandidate {
   id: string;
   createdAt: string;
+  updatedAt: string;
   fullName: string;
-  phone: string | null;
   email: string | null;
-  city: string | null;
-  specialization: string | null;
-  qualificationCategory: string;
-  totalExperienceYears: number | null;
-  accreditationStatus: boolean;
-  accreditationExpiryDate: string | null;
-  status: string;
-  priority: string;
-  branches: string[];
-  processingStatus: string;
-  processingError: string | null;
-  tags: TagEntry[];
-}
-
-export interface CandidateDetail extends CandidateRow {
+  phone: string | null;
   birthDate: string | null;
+  city: string | null;
+  gender: ResumeCandidateGender;
   university: string | null;
   faculty: string | null;
   graduationYear: number | null;
@@ -82,52 +123,81 @@ export interface CandidateDetail extends CandidateRow {
   residencyPlace: string | null;
   residencySpecialty: string | null;
   residencyYearEnd: number | null;
+  specialization: string | null;
   additionalSpecializations: string[];
+  qualificationCategory: ResumeQualificationCategory;
+  categoryAssignedDate: string | null;
+  categoryExpiryDate: string | null;
+  accreditationStatus: boolean;
+  accreditationDate: string | null;
+  accreditationExpiryDate: string | null;
   certificateNumber: string | null;
+  certificateIssueDate: string | null;
   certificateExpiryDate: string | null;
+  totalExperienceYears: number | null;
   specialtyExperienceYears: number | null;
   nmoPoints: number | null;
   publications: string | null;
   languages: string[];
   additionalSkills: string | null;
+  branches: string[];
+  status: ResumeCandidateStatus;
+  doctorTypes: ResumeCandidateDoctorType[];
+  priority: ResumeCandidatePriority;
+  processingStatus: ResumeProcessingStatus;
+  processingError: string | null;
   rawText: string | null;
   aiConfidence: number | null;
-  uploadedFile: UploadedFileRef | null;
-  workHistory: WorkHistoryEntry[];
-  education: EducationEntry[];
-  cmeCourses: CmeCourseEntry[];
-  notes: NoteEntry[];
+  uploadedFileId: string | null;
+  uploadedFile?: ResumeUploadedFile;
+  workHistory?: ResumeWorkHistory[];
+  education?: ResumeEducation[];
+  cmeCourses?: ResumeCmeCourse[];
+  notes?: ResumeCandidateNote[];
+  tags?: ResumeCandidateTag[];
+  aiScore: number | null;
 }
 
-export interface FilterOptions {
-  specializations: string[];
-  categories: string[];
-  statuses: string[];
-  priorities: string[];
-  branches: string[];
-  cities: string[];
-  workCities: string[];
-  educationCities: string[];
+// AI Score types
+export interface ScoreHighlight {
+  type: 'publication' | 'rare_specialty' | 'top_education' | 'unique_experience' | 'certification' | 'language' | 'other';
+  text: string;
+  importance: 'high' | 'medium' | 'low';
 }
 
-export interface UploadedItem {
+export interface ResumeCandidateScore {
   id: string;
-  name: string;
-  size?: number;
-  type: 'file' | 'text';
-  processingStatus: 'PENDING' | 'EXTRACTING' | 'PARSING' | 'COMPLETED' | 'FAILED';
-  candidateId?: string;
-  error?: string;
+  createdAt: string;
+  candidateId: string;
+  totalScore: number;
+  aiSummary: string;
+  strengths: string[];
+  weaknesses: string[];
+  highlights: ScoreHighlight[];
+  comparison: string;
+  percentileRank: number | null;
+  specialization: string | null;
+  totalCandidatesInGroup: number;
+  version: number;
+  isCurrent: boolean;
+  modelVersion: string | null;
+  // Sub-scores (гибридная система)
+  experienceScore: number | null;
+  educationScore: number | null;
+  qualificationScore: number | null;
+  developmentScore: number | null;
+  aiQualitativeScore: number | null;
+  deterministicScore: number | null;
+  confidence: number | null;
 }
 
-export type PeriodPreset = '7d' | '30d' | '90d' | 'year' | 'all';
-
+// Analytics types
 export interface KpiMetric {
   key: string;
   title: string;
   value: number;
   previousValue: number | null;
-  format: 'number' | 'percent' | 'decimal' | 'fraction';
+  format: 'number' | 'decimal' | 'percent' | 'fraction';
   fractionTotal?: number;
   icon: string;
   color: string;
@@ -143,8 +213,8 @@ export interface TimelinePoint {
 export interface FunnelStage {
   name: string;
   value: number;
-  conversionFromPrevious: number | null;
   color: string;
+  conversionFromPrevious: number | null;
 }
 
 export interface BranchDistributionItem {
@@ -181,14 +251,12 @@ export interface AnalyticsData {
   funnel: FunnelStage[];
   specializations: { name: string; count: number }[];
   categories: CategoryItem[];
+  genderDistribution: CategoryItem[];
+  doctorTypeDistribution: CategoryItem[];
   experienceBuckets: { name: string; count: number }[];
   branchDistribution: BranchDistributionItem[];
   branchCoverage: BranchCoverageRow[];
+  scoreDistribution: { name: string; count: number }[];
   topTags: TagCount[];
-  expiringAccreditations: {
-    id: string;
-    fullName: string;
-    specialization: string | null;
-    accreditationExpiryDate: string | null;
-  }[];
+  expiringAccreditations: { id: string; fullName: string; specialization: string | null; accreditationExpiryDate: string }[];
 }

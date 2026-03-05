@@ -4,44 +4,50 @@ import {
   Entity,
   Index,
   JoinColumn,
+  ManyToOne,
   OneToMany,
   OneToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import {
+  ResumeCandidateDoctorType,
+  ResumeCandidateGender,
+  ResumeCandidatePriority,
+  ResumeCandidateStatus,
+  ResumeProcessingStatus,
+  ResumeQualificationCategory,
+} from './resume.enums';
 import { ResumeUploadedFile } from './resume-uploaded-file.entity';
 import { ResumeWorkHistory } from './resume-work-history.entity';
 import { ResumeEducation } from './resume-education.entity';
 import { ResumeCmeCourse } from './resume-cme-course.entity';
 import { ResumeCandidateNote } from './resume-candidate-note.entity';
 import { ResumeCandidateTag } from './resume-candidate-tag.entity';
-import {
-  ResumeCandidatePriority,
-  ResumeCandidateStatus,
-  ResumeProcessingStatus,
-  ResumeQualificationCategory,
-} from './resume.enums';
+import { ResumeCandidateScore } from './resume-candidate-score.entity';
 
 @Entity('resume_candidates')
-@Index('IDX_resume_candidates_specialization', ['specialization'])
-@Index('IDX_resume_candidates_qualificationCategory', ['qualificationCategory'])
-@Index('IDX_resume_candidates_status', ['status'])
-@Index('IDX_resume_candidates_priority', ['priority'])
-@Index('IDX_resume_candidates_processingStatus', ['processingStatus'])
-@Index('IDX_resume_candidates_accreditationExpiryDate', ['accreditationExpiryDate'])
-@Index('IDX_resume_candidates_phone', ['phone'])
-@Index('IDX_resume_candidates_email', ['email'])
+@Index(['specialization'])
+@Index(['qualificationCategory'])
+@Index(['status'])
+@Index(['priority'])
+@Index(['branches'])
+@Index(['processingStatus'])
+@Index(['accreditationExpiryDate'])
+@Index(['phone'])
+@Index(['email'])
+@Index(['doctorTypes'])
 export class ResumeCandidate {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamp' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamp' })
   updatedAt: Date;
 
-  @Column({ length: 300 })
+  @Column({ type: 'varchar' })
   fullName: string;
 
   @Column({ type: 'varchar', nullable: true })
@@ -55,6 +61,12 @@ export class ResumeCandidate {
 
   @Column({ type: 'varchar', nullable: true })
   city: string | null;
+
+  @Column({ type: 'varchar', length: 10, default: 'UNKNOWN' })
+  gender: ResumeCandidateGender;
+
+  @Column({ type: 'text', array: true, default: '{}' })
+  doctorTypes: ResumeCandidateDoctorType[];
 
   @Column({ type: 'varchar', nullable: true })
   university: string | null;
@@ -120,10 +132,10 @@ export class ResumeCandidate {
   @Column({ type: 'timestamp', nullable: true })
   certificateExpiryDate: Date | null;
 
-  @Column({ type: 'double precision', nullable: true })
+  @Column({ type: 'float', nullable: true })
   totalExperienceYears: number | null;
 
-  @Column({ type: 'double precision', nullable: true })
+  @Column({ type: 'float', nullable: true })
   specialtyExperienceYears: number | null;
 
   @Column({ type: 'int', nullable: true })
@@ -168,20 +180,23 @@ export class ResumeCandidate {
   @Column({ type: 'text', nullable: true })
   rawText: string | null;
 
-  @Column({ type: 'double precision', nullable: true })
+  @Column({ type: 'float', nullable: true })
   aiConfidence: number | null;
 
-  @Column({ type: 'uuid', unique: true, nullable: true })
+  @Column({ type: 'uuid', nullable: true, unique: true })
   uploadedFileId: string | null;
 
-  @OneToOne(() => ResumeUploadedFile, { nullable: true, eager: true, onDelete: 'SET NULL' })
+  @ManyToOne(() => ResumeUploadedFile, (file) => file.candidate, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
   @JoinColumn({ name: 'uploadedFileId' })
   uploadedFile: ResumeUploadedFile | null;
 
-  @OneToMany(() => ResumeWorkHistory, (workHistory) => workHistory.candidate)
+  @OneToMany(() => ResumeWorkHistory, (wh) => wh.candidate)
   workHistory: ResumeWorkHistory[];
 
-  @OneToMany(() => ResumeEducation, (education) => education.candidate)
+  @OneToMany(() => ResumeEducation, (edu) => edu.candidate)
   education: ResumeEducation[];
 
   @OneToMany(() => ResumeCmeCourse, (course) => course.candidate)
@@ -192,4 +207,13 @@ export class ResumeCandidate {
 
   @OneToMany(() => ResumeCandidateTag, (tag) => tag.candidate)
   tags: ResumeCandidateTag[];
+
+  @Column({ type: 'float', nullable: true })
+  aiScore: number | null;
+
+  @Column({ type: 'varchar', nullable: true, select: false })
+  embedding: string | null;
+
+  @OneToMany(() => ResumeCandidateScore, (score) => score.candidate)
+  scores: ResumeCandidateScore[];
 }

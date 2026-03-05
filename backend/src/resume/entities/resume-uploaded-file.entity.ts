@@ -1,4 +1,10 @@
-import { Column, CreateDateColumn, Entity, OneToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  OneToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { ResumeCandidate } from './resume-candidate.entity';
 
 @Entity('resume_uploaded_files')
@@ -6,21 +12,23 @@ export class ResumeUploadedFile {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamp' })
   createdAt: Date;
 
-  @Column({ length: 500 })
+  @Column({ type: 'varchar', length: 500 })
   originalName: string;
 
-  @Column({ length: 1000 })
+  @Column({ type: 'varchar', length: 1000 })
   storedPath: string;
 
-  @Column({ length: 255 })
+  @Column({ type: 'varchar', length: 100 })
   mimeType: string;
 
   @Column({ type: 'int' })
   sizeBytes: number;
 
-  @OneToOne(() => ResumeCandidate, (candidate) => candidate.uploadedFile)
+  @OneToOne(() => ResumeCandidate, (candidate) => candidate.uploadedFile, {
+    nullable: true,
+  })
   candidate: ResumeCandidate | null;
 }

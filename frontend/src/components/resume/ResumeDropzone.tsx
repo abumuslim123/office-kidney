@@ -1,119 +1,108 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { api } from '../../lib/api';
-import type { UploadedItem } from '../../lib/resume-types';
+import { ACCEPTED_FILE_TYPES, MAX_FILE_SIZE } from '../../lib/resume-constants';
 
-const ACCEPTED_EXTENSIONS = ['.pdf', '.docx', '.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tiff', '.tif'];
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
+type Props = {
+  onUploaded: () => void;
+};
 
-interface Props {
-  onUpload: (item: UploadedItem) => void;
-  onUpdate: (id: string, updates: Partial<UploadedItem>) => void;
-}
+const acceptStr = Object.entries(ACCEPTED_FILE_TYPES)
+  .flatMap(([mime, exts]) => [mime, ...exts])
+  .join(',');
 
-export default function ResumeDropzone({ onUpload, onUpdate }: Props) {
-  const [isDragOver, setIsDragOver] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const pollingRefs = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+export default function ResumeDropzone({ onUploaded }: Props) {
+  const [dragging, setDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    return () => {
-      for (const interval of pollingRefs.current.values()) clearInterval(interval);
-    };
-  }, []);
-
-  const startPolling = useCallback((uploadId: string, candidateId: string) => {
-    let pollCount = 0;
-    const MAX_POLLS = 40;
-
-    const interval = setInterval(async () => {
-      pollCount++;
-      if (pollCount > MAX_POLLS) {
-        clearInterval(interval);
-        pollingRefs.current.delete(uploadId);
-        onUpdate(uploadId, { processingStatus: 'FAILED', error: 'Превышено время ожидания обработки' });
-        return;
-      }
-      try {
-        const res = await api.get(`/resume/candidates/${candidateId}`);
-        const data = res.data as { processingStatus: UploadedItem['processingStatus']; processingError?: string };
-        onUpdate(uploadId, { processingStatus: data.processingStatus, candidateId, error: data.processingError });
-        if (data.processingStatus === 'COMPLETED' || data.processingStatus === 'FAILED') {
-          clearInterval(interval);
-          pollingRefs.current.delete(uploadId);
-        }
-      } catch { /* retry */ }
-    }, 3000);
-
-    pollingRefs.current.set(uploadId, interval);
-  }, [onUpdate]);
-
-  const uploadFile = useCallback(async (file: File) => {
-    const uploadId = crypto.randomUUID();
-    onUpload({ id: uploadId, name: file.name, size: file.size, type: 'file', processingStatus: 'PENDING' });
-
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const res = await api.post('/resume/upload', formData, { timeout: 120000 });
-      const data = res.data as { id: string; candidateId?: string };
-      const candidateId = data.candidateId || data.id;
-      onUpdate(uploadId, { processingStatus: 'EXTRACTING', candidateId });
-      startPolling(uploadId, candidateId);
-    } catch {
-      onUpdate(uploadId, { processingStatus: 'FAILED', error: 'Не удалось загрузить файл' });
-    }
-  }, [onUpload, onUpdate, startPolling]);
-
-  const validateAndUpload = useCallback((files: FileList | File[]) => {
-    Array.from(files).forEach((file) => {
-      const ext = `.${file.name.split('.').pop()?.toLowerCase()}`;
-      if (!ACCEPTED_EXTENSIONS.includes(ext)) {
-        const id = crypto.randomUUID();
-        onUpload({ id, name: file.name, size: file.size, type: 'file', processingStatus: 'FAILED', error: 'Неподдерживаемый формат файла' });
-        return;
-      }
+  const upload = useCallback(
+    async (file: File) => {
+      setError('');
       if (file.size > MAX_FILE_SIZE) {
-        const id = crypto.randomUUID();
-        onUpload({ id, name: file.name, size: file.size, type: 'file', processingStatus: 'FAILED', error: 'Файл превышает 10 МБ' });
+        setError('Файл слишком большой (макс. 10 МБ)');
         return;
       }
-      uploadFile(file);
-    });
-  }, [onUpload, uploadFile]);
+      const mimeOk = Object.keys(ACCEPTED_FILE_TYPES).includes(file.type);
+      const extOk = Object.values(ACCEPTED_FILE_TYPES)
+        .flat()
+        .some((ext) => file.name.toLowerCase().endsWith(ext));
+      if (!mimeOk && !extOk) {
+        setError('Неподдерживаемый формат файла. Допустимы: PDF, DOCX, TXT');
+        return;
+      }
+      setUploading(true);
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        await api.post('/resume/upload', form);
+        onUploaded();
+      } catch (err: unknown) {
+        const data =
+          err && typeof err === 'object' && 'response' in err
+            ? (err as { response?: { data?: { message?: string } } }).response?.data
+            : null;
+        setError(data?.message || 'Ошибка загрузки файла');
+      } finally {
+        setUploading(false);
+      }
+    },
+    [onUploaded],
+  );
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragging(false);
+      const file = e.dataTransfer.files[0];
+      if (file) upload(file);
+    },
+    [upload],
+  );
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) upload(file);
+    e.target.value = '';
+  };
 
   return (
-    <div
-      onClick={() => fileInputRef.current?.click()}
-      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(true); }}
-      onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(false); }}
-      onDrop={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsDragOver(false);
-        if (e.dataTransfer.files.length > 0) validateAndUpload(e.dataTransfer.files);
-      }}
-      className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 transition-colors ${
-        isDragOver ? 'border-indigo-500 bg-indigo-50' : 'border-gray-300 hover:border-indigo-400'
-      }`}
-    >
-      <svg className="mb-3 h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-      </svg>
-      <p className="text-sm font-medium text-gray-700">Перетащите файлы сюда</p>
-      <p className="mt-1 text-xs text-gray-500">PDF, DOCX, JPG, PNG, WEBP — до 10 МБ</p>
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        accept={ACCEPTED_EXTENSIONS.join(',')}
-        onChange={(e) => {
-          if (e.target.files && e.target.files.length > 0) {
-            validateAndUpload(e.target.files);
-            e.target.value = '';
-          }
+    <div>
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
         }}
-        className="hidden"
-      />
+        onDragLeave={() => setDragging(false)}
+        onDrop={handleDrop}
+        onClick={() => inputRef.current?.click()}
+        className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
+          dragging
+            ? 'border-accent bg-accent/5'
+            : 'border-gray-300 hover:border-gray-400'
+        }`}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept={acceptStr}
+          onChange={handleChange}
+          className="hidden"
+        />
+        {uploading ? (
+          <p className="text-sm text-gray-500">Загрузка...</p>
+        ) : (
+          <>
+            <p className="text-sm text-gray-600 font-medium">
+              Перетащите файл резюме или нажмите для выбора
+            </p>
+            <p className="text-xs text-gray-400 mt-1">PDF, DOCX, TXT — до 10 МБ</p>
+          </>
+        )}
+      </div>
+      {error && (
+        <p className="mt-2 text-sm text-red-600">{error}</p>
+      )}
     </div>
   );
 }

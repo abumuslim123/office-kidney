@@ -1,11 +1,11 @@
-import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
+import { Column, Entity, PrimaryColumn } from 'typeorm';
 
 @Entity('resume_telegram_chats')
 export class ResumeTelegramChat {
   @PrimaryColumn({ type: 'bigint' })
   chatId: string;
 
-  @CreateDateColumn()
+  @Column({ type: 'timestamp', default: () => 'NOW()' })
   authorizedAt: Date;
 
   @Column({ type: 'varchar', nullable: true })

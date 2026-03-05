@@ -8,7 +8,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: ${DB_USERNAME:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
@@ -56,6 +56,30 @@ services:
         condition: service_healthy
     ports:
       - "3000:3000"
+
+  telegram-bot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    command: ["node", "dist/resume/resume.telegram.worker.js"]
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_DATABASE: ${DB_DATABASE:-kidney_office}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://141.105.65.20:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:32b}
+      OLLAMA_TIMEOUT_MS: ${OLLAMA_TIMEOUT_MS:-45000}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_BOT_PASSWORD: ${TELEGRAM_BOT_PASSWORD:-}
+    volumes:
+      - ../backend/uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
   frontend:
     build:
