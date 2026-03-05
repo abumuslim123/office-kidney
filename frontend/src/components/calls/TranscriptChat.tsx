@@ -19,6 +19,7 @@ type TranscriptChatProps = {
   words: TimedWord[] | null;
   currentTime: number;
   keywords: string[];
+  highlightedKeywords?: string[];
   onSeek: (time: number) => void;
 };
 
@@ -32,6 +33,17 @@ function isKeywordMatch(word: string, keywords: string[]): boolean {
   return keywords.some((kw) => lower.includes(kw.toLowerCase()));
 }
 
+function getKeywordHighlightClass(word: string, keywords: string[], highlightedKeywords: string[]): string {
+  const lower = word.toLowerCase().replace(/[.,!?;:"""''()]/g, '');
+  if (highlightedKeywords.length && highlightedKeywords.some((kw) => lower.includes(kw.toLowerCase()))) {
+    return 'bg-green-300 bg-opacity-70';
+  }
+  if (keywords.length && keywords.some((kw) => lower.includes(kw.toLowerCase()))) {
+    return 'bg-yellow-200 bg-opacity-70';
+  }
+  return '';
+}
+
 /** Map words to turns based on time overlap */
 function mapWordsToTurns(turns: Turn[], words: TimedWord[]): (TimedWord[] | null)[] {
   return turns.map((turn) => {
@@ -43,7 +55,7 @@ function mapWordsToTurns(turns: Turn[], words: TimedWord[]): (TimedWord[] | null
   });
 }
 
-export default function TranscriptChat({ turns, words, currentTime, keywords, onSeek }: TranscriptChatProps) {
+export default function TranscriptChat({ turns, words, currentTime, keywords, highlightedKeywords = [], onSeek }: TranscriptChatProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const activeHighlightRef = useRef<HTMLSpanElement | null>(null);
   const activeTurnIdxRef = useRef<number>(-1);
@@ -155,14 +167,12 @@ export default function TranscriptChat({ turns, words, currentTime, keywords, on
                   wordsForTurn.map((w, wIdx) => {
                     // Find global word index for data-widx
                     const globalIdx = words!.indexOf(w);
-                    const isKw = isKeywordMatch(w.word, keywords);
+                    const kwClass = getKeywordHighlightClass(w.word, keywords, highlightedKeywords);
                     return (
                       <span
                         key={wIdx}
                         data-widx={globalIdx}
-                        className={`cursor-pointer rounded-sm transition-colors ${
-                          isKw ? 'bg-yellow-200 bg-opacity-70' : ''
-                        }`}
+                        className={`cursor-pointer rounded-sm transition-colors ${kwClass}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           onSeek(w.start);
@@ -175,12 +185,27 @@ export default function TranscriptChat({ turns, words, currentTime, keywords, on
                 ) : (
                   <span
                     dangerouslySetInnerHTML={{
-                      __html: keywords.length
-                        ? turn.text.replace(
-                            new RegExp(`(${keywords.map(escapeRegExp).join('|')})`, 'gi'),
+                      __html: (() => {
+                        let html = turn.text;
+                        // First pass: green highlights for active topic keywords
+                        if (highlightedKeywords.length) {
+                          html = html.replace(
+                            new RegExp(`(${highlightedKeywords.map(escapeRegExp).join('|')})`, 'gi'),
+                            '<mark class="bg-green-300 rounded-sm">$1</mark>',
+                          );
+                        }
+                        // Second pass: yellow highlights for remaining keywords (skip already marked)
+                        const remaining = keywords.filter(
+                          (kw) => !highlightedKeywords.some((hk) => hk.toLowerCase() === kw.toLowerCase()),
+                        );
+                        if (remaining.length) {
+                          html = html.replace(
+                            new RegExp(`(?!<[^>]*)(${remaining.map(escapeRegExp).join('|')})(?![^<]*>)`, 'gi'),
                             '<mark class="bg-yellow-200 rounded-sm">$1</mark>',
-                          )
-                        : turn.text,
+                          );
+                        }
+                        return html;
+                      })(),
                     }}
                   />
                 )}

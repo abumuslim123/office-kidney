@@ -160,7 +160,7 @@ export class AitunnelAudioService {
         this.logger.log(`SpeechKit chunk ${i + 1}/${chunks.length}: ${data.length} bytes`);
         try {
           const res = await axios.post(
-            `${SPEECHKIT_STT_URL}?lang=ru-RU&topic=general&folderId=${cfg.folderId}`,
+            `${SPEECHKIT_STT_URL}?lang=ru-RU&topic=general&folderId=${cfg.folderId}&format=lpcm&sampleRateHertz=16000`,
             data,
             {
               headers: {
@@ -298,6 +298,91 @@ export class AitunnelAudioService {
     }
 
     return text;
+  }
+
+  /**
+   * LLM-диаризация: разбивает сплошной текст транскрипции на реплики оператора и абонента.
+   * Используется когда транскрипция (например Yandex SpeechKit) не поддерживает диаризацию.
+   * Возвращает массив реплик или null при ошибке.
+   */
+  async diarizeWithLLM(text: string): Promise<{ speaker: 'operator' | 'abonent'; text: string }[] | null> {
+    if (!text || text.trim().length < 20) return null;
+
+    const systemPrompt =
+      'Ты размечаешь диалог звонка в клинику «Кидней». ' +
+      'На входе — сплошной текст транскрипции телефонного разговора между оператором клиники и абонентом (пациентом/родителем). ' +
+      'Раздели текст на реплики, определи кто говорит. Оператор обычно приветствует, представляет клинику, предлагает записаться. ' +
+      'Абонент спрашивает о записи, ценах, симптомах. ' +
+      'Верни ТОЛЬКО валидный JSON-массив без markdown-обёртки, формат: [{"speaker":"operator","text":"..."},{"speaker":"abonent","text":"..."}]. ' +
+      'Не добавляй пояснений, комментариев или markdown.';
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: text },
+    ];
+
+    const tryParse = (content: string): { speaker: 'operator' | 'abonent'; text: string }[] | null => {
+      try {
+        // Убираем возможную markdown-обёртку
+        const cleaned = content.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+        const arr = JSON.parse(cleaned);
+        if (Array.isArray(arr) && arr.length > 0 && arr[0].speaker && arr[0].text) {
+          return arr.map((item: { speaker: string; text: string }) => ({
+            speaker: item.speaker === 'abonent' ? 'abonent' : 'operator',
+            text: String(item.text),
+          }));
+        }
+      } catch { /* ignore */ }
+      return null;
+    };
+
+    const polza = await this.getPolzaConfig();
+    if (polza) {
+      try {
+        const chatUrl = polza.url.replace('/audio/transcriptions', '/chat/completions');
+        const res = await axios.post(
+          chatUrl,
+          { model: POLZA_CORRECTION_MODEL, messages, max_tokens: 4096, temperature: 0.1 },
+          { headers: { Authorization: `Bearer ${polza.apiKey}`, 'Content-Type': 'application/json' }, timeout: 90_000 },
+        );
+        const content: unknown = res.data?.choices?.[0]?.message?.content;
+        if (typeof content === 'string') {
+          const result = tryParse(content);
+          if (result) {
+            this.logger.log('LLM diarization via Polza.ai succeeded');
+            return result;
+          }
+        }
+      } catch (err) {
+        const msg = axios.isAxiosError(err) ? `${err.response?.status}` : String(err);
+        this.logger.warn(`LLM diarization via Polza.ai failed: ${msg}`);
+      }
+    }
+
+    const aitunnel = await this.getAitunnelConfig();
+    if (aitunnel) {
+      try {
+        const res = await axios.post(
+          `${AITUNNEL_BASE}/chat/completions`,
+          { model: AITUNNEL_CORRECTION_MODEL, messages, max_tokens: 4096, temperature: 0.1 },
+          { headers: { Authorization: `Bearer ${aitunnel.apiKey}`, 'Content-Type': 'application/json' }, timeout: 90_000 },
+        );
+        const content: unknown = res.data?.choices?.[0]?.message?.content;
+        if (typeof content === 'string') {
+          const result = tryParse(content);
+          if (result) {
+            this.logger.log('LLM diarization via AITunnel succeeded');
+            return result;
+          }
+        }
+      } catch (err) {
+        const msg = axios.isAxiosError(err) ? `${err.response?.status}` : String(err);
+        this.logger.warn(`LLM diarization via AITunnel failed: ${msg}`);
+      }
+    }
+
+    this.logger.warn('LLM diarization failed — no provider available or bad response');
+    return null;
   }
 
   /** Транскрипция с диаризацией (определение спикеров по голосу). Fallback: Polza → AITunnel */

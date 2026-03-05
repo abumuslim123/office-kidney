@@ -133,13 +133,14 @@ export class CallsController {
   async upload(
     @UploadedFile() file: Express.Multer.File,
     @Body()
-    body: { employeeName?: string; clientName?: string; callAt?: string; durationSeconds?: string },
+    body: { employeeName?: string; clientName?: string; clientPhone?: string; callAt?: string; durationSeconds?: string },
   ) {
     if (!file?.buffer) throw new BadRequestException('Файл не загружен');
     return this.calls.uploadCall({
       file,
       employeeName: body.employeeName,
       clientName: body.clientName,
+      clientPhone: body.clientPhone,
       callAt: body.callAt,
       durationSeconds: body.durationSeconds,
     });

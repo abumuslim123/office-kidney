@@ -28,6 +28,7 @@ type CallData = {
   id: string;
   employeeName: string;
   clientName: string | null;
+  clientPhone: string | null;
   callAt: string;
   durationSeconds: number;
   speechDurationSeconds: number;
@@ -51,6 +52,7 @@ export default function CallDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [currentTime, setCurrentTime] = useState(0);
+  const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
   const playerRef = useRef<AudioPlayerHandle>(null);
 
   useEffect(() => {
@@ -72,24 +74,42 @@ export default function CallDetail() {
     setCurrentTime(time);
   }, []);
 
+  // Keywords of the active (clicked) topic — for green highlighting
+  const activeTopicKeywords = useMemo(() => {
+    if (!activeTopicId || !call?.matches?.length) return [];
+    return call.matches
+      .filter((m) => m.topicId === activeTopicId)
+      .map((m) => m.keyword);
+  }, [activeTopicId, call]);
+
+  const handleTopicClick = useCallback((topicId: string) => {
+    setActiveTopicId((prev) => (prev === topicId ? null : topicId));
+  }, []);
+
   // Compute keyword positions for waveform markers (must be before early returns)
   const keywordMarkers = useMemo(() => {
     const words = call?.transcript?.words;
     const matches = call?.matches;
     if (!words?.length || !matches?.length) return [];
     const keywords = matches.map((m) => m.keyword);
-    const result: { time: number; label: string }[] = [];
+    const activeKwSet = new Set(activeTopicKeywords.map((k) => k.toLowerCase()));
+    const result: { time: number; label: string; color: string }[] = [];
     for (const w of words) {
       const cleaned = w.word.toLowerCase().replace(/[.,!?;:"""''()]/g, '');
       for (const kw of keywords) {
         if (cleaned.includes(kw.toLowerCase())) {
-          result.push({ time: w.start, label: kw });
+          const isActive = activeKwSet.has(kw.toLowerCase());
+          result.push({
+            time: w.start,
+            label: kw,
+            color: isActive ? 'rgba(34, 197, 94, 0.6)' : 'rgba(234, 179, 8, 0.5)',
+          });
           break;
         }
       }
     }
     return result;
-  }, [call]);
+  }, [call, activeTopicKeywords]);
 
   if (loading) {
     return (
@@ -146,7 +166,11 @@ export default function CallDetail() {
             <div>
               <h1 className="text-base font-semibold text-gray-900">
                 {call.employeeName}
-                {call.clientName && <span className="text-gray-400 font-normal"> &rarr; {call.clientName}</span>}
+                {(call.clientName || call.clientPhone) && (
+                  <span className="text-gray-400 font-normal">
+                    {' '}&rarr; {call.clientName || ''}{call.clientName && call.clientPhone ? ' ' : ''}{call.clientPhone && <span className="text-gray-400">{call.clientPhone}</span>}
+                  </span>
+                )}
               </h1>
               <div className="text-xs text-gray-500 flex items-center gap-2">
                 <span>{new Date(call.callAt).toLocaleString('ru-RU')}</span>
@@ -185,6 +209,7 @@ export default function CallDetail() {
                   words={words}
                   currentTime={currentTime}
                   keywords={keywords}
+                  highlightedKeywords={activeTopicKeywords}
                   onSeek={handleSeek}
                 />
               ) : (
@@ -192,7 +217,7 @@ export default function CallDetail() {
               )}
             </div>
             <div className="border-l border-gray-200 px-5 py-4 overflow-y-auto bg-gray-50/50">
-              <TopicsPanel matches={call.matches} />
+              <TopicsPanel matches={call.matches} activeTopicId={activeTopicId} onTopicClick={handleTopicClick} />
             </div>
           </div>
         ) : (

@@ -17,6 +17,9 @@ export class Call {
   @Column({ type: 'varchar', length: 200, nullable: true })
   clientName: string | null;
 
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  clientPhone: string | null;
+
   @Column({ type: 'timestamp', default: () => 'now()' })
   callAt: Date;
 

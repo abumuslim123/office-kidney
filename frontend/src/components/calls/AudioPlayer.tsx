@@ -30,6 +30,8 @@ function formatTime(sec: number): string {
 const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(({ audioUrl, authToken, onTimeUpdate, markers }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WaveSurfer | null>(null);
+  const regionsRef = useRef<ReturnType<typeof RegionsPlugin.create> | null>(null);
+  const [isReady, setIsReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -75,6 +77,7 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(({ audioUrl,
       if (cancelled || !containerRef.current) return;
 
       const regions = RegionsPlugin.create();
+      regionsRef.current = regions;
 
       const ws = WaveSurfer.create({
         container: containerRef.current,
@@ -91,19 +94,7 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(({ audioUrl,
 
       ws.on('ready', () => {
         setDuration(ws.getDuration());
-
-        // Add keyword markers on the waveform
-        if (markers?.length) {
-          markers.forEach((m) => {
-            regions.addRegion({
-              start: m.time,
-              end: m.time + 0.15,
-              color: m.color || 'rgba(234, 179, 8, 0.5)',
-              drag: false,
-              resize: false,
-            });
-          });
-        }
+        setIsReady(true);
       });
 
       ws.on('timeupdate', (time: number) => {
@@ -132,6 +123,24 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(({ audioUrl,
       if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
   }, [audioUrl, authToken]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Update markers when they change (e.g. active topic selection)
+  useEffect(() => {
+    const regions = regionsRef.current;
+    if (!regions || !isReady) return;
+    regions.clearRegions();
+    if (markers?.length) {
+      markers.forEach((m) => {
+        regions.addRegion({
+          start: m.time,
+          end: m.time + 0.15,
+          color: m.color || 'rgba(234, 179, 8, 0.5)',
+          drag: false,
+          resize: false,
+        });
+      });
+    }
+  }, [markers, isReady]);
 
   const togglePlay = useCallback(() => {
     wsRef.current?.playPause();
