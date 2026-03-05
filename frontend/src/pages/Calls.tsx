@@ -34,6 +34,7 @@ type CallRow = {
   id: string;
   employeeName: string;
   clientName: string | null;
+  clientPhone: string | null;
   callAt: string;
   durationSeconds: number;
   speechDurationSeconds: number;
@@ -237,6 +238,7 @@ export default function Calls() {
 
   const [uploadEmployeeName, setUploadEmployeeName] = useState('');
   const [uploadClientName, setUploadClientName] = useState('');
+  const [uploadClientPhone, setUploadClientPhone] = useState('');
   const [uploadCallAt, setUploadCallAt] = useState(() => toLocalInput(new Date()));
   const [uploadDurationSeconds, setUploadDurationSeconds] = useState('');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -340,6 +342,7 @@ export default function Calls() {
       form.append('file', uploadFile);
       form.append('employeeName', uploadEmployeeName || 'Неизвестно');
       if (uploadClientName) form.append('clientName', uploadClientName);
+      if (uploadClientPhone) form.append('clientPhone', uploadClientPhone);
       if (uploadCallAt) form.append('callAt', toIso(uploadCallAt));
       if (uploadDurationSeconds) form.append('durationSeconds', uploadDurationSeconds);
       await api.post('/calls/upload', form);
@@ -552,7 +555,7 @@ export default function Calls() {
       {showUpload && (
         <div className="mb-5 p-5 bg-white border border-gray-200 rounded-xl shadow-sm">
           <div className="text-sm font-medium text-gray-700 mb-3">Ручная загрузка аудио</div>
-          <form onSubmit={handleUpload} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
+          <form onSubmit={handleUpload} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 items-end">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Сотрудник</label>
               <input
@@ -571,6 +574,16 @@ export default function Calls() {
                 onChange={(e) => setUploadClientName(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-accent/30 focus:border-accent outline-none transition"
                 placeholder="ООО Ромашка"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Телефон клиента</label>
+              <input
+                type="tel"
+                value={uploadClientPhone}
+                onChange={(e) => setUploadClientPhone(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-accent/30 focus:border-accent outline-none transition"
+                placeholder="+7 999 123-45-67"
               />
             </div>
             <div>
@@ -663,7 +676,7 @@ export default function Calls() {
             <thead>
               <tr className="bg-gray-50/80">
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Дата</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Сотрудник</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Кто звонил</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Клиент</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Длительность</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Тематики</th>
@@ -688,7 +701,14 @@ export default function Calls() {
                         {call.employeeName}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
-                        {call.clientName || <span className="text-gray-300">&mdash;</span>}
+                        {call.clientName || call.clientPhone ? (
+                          <div>
+                            {call.clientName && <div>{call.clientName}</div>}
+                            {call.clientPhone && <div className="text-xs text-gray-400">{call.clientPhone}</div>}
+                          </div>
+                        ) : (
+                          <span className="text-gray-300">&mdash;</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-700">
                         <div className="font-medium">{formatSeconds(call.durationSeconds)}</div>

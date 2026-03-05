@@ -23,7 +23,7 @@ import {
   CALLS_PROVIDER,
 } from './calls-settings.constants';
 import { AitunnelAudioService } from './aitunnel-audio.service';
-import { splitStereoAudioToMonoFiles, preprocessAudioForTranscription } from './wav-channel-splitter';
+import { splitStereoAudioToMonoFiles, preprocessAudioForTranscription, getAudioDurationSeconds } from './wav-channel-splitter';
 
 type CallFilters = {
   from?: Date;
@@ -36,6 +36,7 @@ type UploadCallPayload = {
   file: Express.Multer.File;
   employeeName?: string;
   clientName?: string;
+  clientPhone?: string;
   callAt?: string;
   durationSeconds?: string;
 };
@@ -224,12 +225,14 @@ export class CallsService {
     if (!payload.file?.buffer) throw new BadRequestException('Файл не загружен');
     const employeeName = payload.employeeName?.trim() || 'Неизвестно';
     const clientName = payload.clientName?.trim() || null;
+    const clientPhone = payload.clientPhone?.trim() || null;
     const callAt = payload.callAt ? new Date(payload.callAt) : new Date();
     const durationSeconds = payload.durationSeconds ? Math.max(0, parseInt(payload.durationSeconds, 10)) : 0;
 
     const call = this.callRepo.create({
       employeeName,
       clientName,
+      clientPhone,
       callAt: Number.isNaN(callAt.getTime()) ? new Date() : callAt,
       durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : 0,
       speechDurationSeconds: 0,
@@ -704,17 +707,25 @@ export class CallsService {
             text: seg.text,
           }));
         } else {
-          // API вернул текст без сегментов — разбиваем по строкам, чередуем оператор/собеседник
+          // API вернул текст без сегментов — пробуем LLM-диаризацию, затем эвристику
           const rawText = pickText(response);
-          const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-          if (lines.length > 1) {
-            // Определяем, кто говорит первым: оператор обычно приветствует и представляет клинику
-            const greetingPattern = /здравствуйте|добрый\s*(день|вечер|утро)|чем\s*(могу|можем)\s*помочь|клиника|кидней|kidney|слушаю\s*вас|алл[её]/i;
-            const firstIsOperator = greetingPattern.test(lines[0]);
-            turnsFromDiarize = lines.map((line, i) => ({
-              speaker: ((i % 2 === 0) === firstIsOperator ? 'operator' : 'abonent') as 'operator' | 'abonent',
-              text: line,
-            }));
+
+          // LLM-диаризация: отправляем сплошной текст в LLM для разметки на реплики
+          const llmTurns = await this.audioProvider.diarizeWithLLM(rawText);
+          if (llmTurns && llmTurns.length > 1) {
+            this.logger.log(`LLM diarization produced ${llmTurns.length} turns`);
+            turnsFromDiarize = llmTurns;
+          } else {
+            // Fallback: разбиваем по строкам, чередуем оператор/собеседник
+            const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            if (lines.length > 1) {
+              const greetingPattern = /здравствуйте|добрый\s*(день|вечер|утро)|чем\s*(могу|можем)\s*помочь|клиника|кидней|kidney|слушаю\s*вас|алл[её]/i;
+              const firstIsOperator = greetingPattern.test(lines[0]);
+              turnsFromDiarize = lines.map((line, i) => ({
+                speaker: ((i % 2 === 0) === firstIsOperator ? 'operator' : 'abonent') as 'operator' | 'abonent',
+                text: line,
+              }));
+            }
           }
         }
 
@@ -780,10 +791,24 @@ export class CallsService {
       let speechSeconds = Number(speechRaw);
       let silenceSeconds = Number(silenceRaw);
 
+      // Если API не вернул общую длительность — получаем из аудиофайла через ffprobe
+      if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+        durationSeconds = await getAudioDurationSeconds(audioPath);
+      }
+
       // Если API не вернул речь/молчание — вычисляем из сегментов
       if ((!Number.isFinite(speechSeconds) || speechSeconds <= 0) && stereoTurns && stereoTurns.length > 0) {
         speechSeconds = stereoTurns.reduce((sum, t) => sum + (t.end - t.start), 0);
       }
+
+      // Оценка речи по количеству слов (~150 слов/мин для русской речи)
+      if ((!Number.isFinite(speechSeconds) || speechSeconds <= 0) && text) {
+        const wordCount = text.replace(/[^\p{L}\p{N}]+/gu, ' ').trim().split(/\s+/).length;
+        if (wordCount > 0) {
+          speechSeconds = Math.min((wordCount / 150) * 60, durationSeconds > 0 ? durationSeconds : Infinity);
+        }
+      }
+
       if (Number.isFinite(durationSeconds) && durationSeconds > 0 && Number.isFinite(speechSeconds) && speechSeconds > 0) {
         if (!Number.isFinite(silenceSeconds) || silenceSeconds <= 0) {
           silenceSeconds = Math.max(0, durationSeconds - speechSeconds);
