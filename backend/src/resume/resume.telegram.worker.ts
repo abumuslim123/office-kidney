@@ -43,6 +43,8 @@ const ACCEPTED_MIMES = new Set([
   'image/webp',
   'image/bmp',
   'image/tiff',
+  'application/vnd.apple.pages',
+  'application/x-iwork-pages-sffpages',
 ]);
 
 const EXT_TO_MIME: Record<string, string> = {
@@ -57,6 +59,7 @@ const EXT_TO_MIME: Record<string, string> = {
   '.bmp': 'image/bmp',
   '.tiff': 'image/tiff',
   '.tif': 'image/tiff',
+  '.pages': 'application/vnd.apple.pages',
 };
 
 function getMimeFromFilename(filename: string): string | null {
@@ -193,10 +196,44 @@ async function bootstrap() {
   // -------------------------------------------------------------------------
 
   bot.on('message:text', async (ctx) => {
-    // Already authorized — send a hint
+    // Already authorized — handle text as resume source
     if (authorizedChats.has(ctx.chat.id)) {
+      const text = ctx.message.text.trim();
+
+      // Проверяем, содержит ли текст URL
+      const urlMatch = text.match(/https?:\/\/[^\s<>"']+(?<![.,;:!?)»])/);
+      if (urlMatch) {
+        const url = urlMatch[0];
+        await ctx.reply(`Загрузка резюме по ссылке: ${url}...`);
+        try {
+          const { candidateId } = await service.createCandidateFromUrl(url);
+          scheduleNotification(bot, ctx.chat.id, service, candidateId);
+        } catch (err) {
+          const msg =
+            err instanceof Error ? err.message : 'Ошибка загрузки по URL';
+          await ctx.reply(`Ошибка: ${msg}`);
+        }
+        return;
+      }
+
+      // Длинный текст (>200 символов) — считаем текстом резюме
+      if (text.length > 200) {
+        await ctx.reply('Обработка текста резюме...');
+        try {
+          const candidate = await service.createCandidateFromText(text);
+          scheduleNotification(bot, ctx.chat.id, service, candidate.id);
+        } catch (err) {
+          const msg =
+            err instanceof Error ? err.message : 'Ошибка обработки текста';
+          await ctx.reply(`Ошибка: ${msg}`);
+        }
+        return;
+      }
+
+      // Короткий текст без URL — подсказка
       await ctx.reply(
-        'Отправьте файл резюме (PDF, DOCX, TXT или фото).',
+        'Отправьте файл резюме (PDF, DOCX, TXT, Pages или фото),\n' +
+          'ссылку на резюме или текст резюме.',
       );
       return;
     }
@@ -222,8 +259,11 @@ async function bootstrap() {
       );
       await ctx.reply(
         'Доступ открыт!\n\n' +
-          'Отправьте файл резюме в одном из форматов:\n' +
-          'PDF, DOCX, TXT или фото (JPG, PNG).',
+          'Отправьте резюме любым способом:\n' +
+          '- Файл (PDF, DOCX, TXT, Pages)\n' +
+          '- Фото или скриншот\n' +
+          '- Ссылку на резюме (hh.ru и др.)\n' +
+          '- Текст резюме',
       );
     } else {
       const current = loginAttempts.get(ctx.chat.id) || {
@@ -417,6 +457,75 @@ async function processFile(
       'Произошла ошибка при обработке файла. Попробуйте позже.',
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// scheduleNotification — non-blocking poll for candidate status
+// ---------------------------------------------------------------------------
+
+function scheduleNotification(
+  bot: Bot,
+  chatId: number,
+  service: ResumeService,
+  candidateId: string,
+): void {
+  let polls = 0;
+  const MAX_POLLS = 60;
+  const POLL_INTERVAL = 3000;
+
+  const interval = setInterval(async () => {
+    polls++;
+    if (polls > MAX_POLLS) {
+      clearInterval(interval);
+      await bot.api
+        .sendMessage(
+          chatId,
+          'Обработка занимает слишком много времени. Проверьте результат в веб-интерфейсе.',
+        )
+        .catch(() => {});
+      return;
+    }
+
+    try {
+      const candidate = await service.findCandidateById(candidateId);
+
+      if (candidate.processingStatus === 'COMPLETED') {
+        clearInterval(interval);
+        const parts: string[] = [];
+        if (candidate.fullName) parts.push(`ФИО: ${candidate.fullName}`);
+        if (candidate.specialization)
+          parts.push(`Специализация: ${candidate.specialization}`);
+        if (candidate.phone) parts.push(`Телефон: ${candidate.phone}`);
+        if (candidate.email) parts.push(`Email: ${candidate.email}`);
+        if (candidate.city) parts.push(`Город: ${candidate.city}`);
+        if (candidate.totalExperienceYears != null)
+          parts.push(`Стаж: ${candidate.totalExperienceYears} лет`);
+        if (candidate.aiConfidence != null)
+          parts.push(
+            `Качество парсинга: ${Math.round(candidate.aiConfidence * 100)}%`,
+          );
+
+        await bot.api.sendMessage(
+          chatId,
+          parts.length > 0
+            ? `Резюме обработано:\n\n${parts.join('\n')}`
+            : 'Резюме обработано, но данные не удалось извлечь.',
+        );
+        return;
+      }
+
+      if (candidate.processingStatus === 'FAILED') {
+        clearInterval(interval);
+        await bot.api.sendMessage(
+          chatId,
+          `Ошибка обработки: ${candidate.processingError || 'Неизвестная ошибка'}`,
+        );
+        return;
+      }
+    } catch {
+      // candidate not found yet, continue polling
+    }
+  }, POLL_INTERVAL);
 }
 
 bootstrap().catch(console.error);

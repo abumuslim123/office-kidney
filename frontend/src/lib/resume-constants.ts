@@ -211,6 +211,12 @@ export const ACCEPTED_FILE_TYPES: Record<string, string[]> = {
   'application/pdf': ['.pdf'],
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
   'text/plain': ['.txt'],
+  'image/jpeg': ['.jpg', '.jpeg'],
+  'image/png': ['.png'],
+  'image/webp': ['.webp'],
+  'image/bmp': ['.bmp'],
+  'image/tiff': ['.tiff', '.tif'],
+  'application/vnd.apple.pages': ['.pages'],
 };
 
 export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB

@@ -6,4 +6,6 @@ export const ollama = new Ollama({
 
 export const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:32b';
 
-export const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL || 'nomic-embed-text';
+export const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL || 'snowflake-arctic-embed2';
+
+export const OLLAMA_FAST_MODEL = process.env.OLLAMA_FAST_MODEL || 'phi4';

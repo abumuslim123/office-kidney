@@ -47,10 +47,11 @@ import { parseCvText, evaluateParsingQuality } from './ai/parse-cv';
 import { buildCvParsingPrompt } from './ai/prompts';
 import type { CvParsedOutput } from './ai/schemas';
 import { ResumeCandidateScore } from './entities/resume-candidate-score.entity';
-import { buildCompactProfile } from './ai/embedding';
+import { buildCompactProfile, buildCandidateProfileText, generateEmbedding, generateEmbeddingsBatch, saveEmbedding, expandSearchQuery } from './ai/embedding';
+import { kMeansClustering, suggestK } from './ai/clustering';
 import { buildScoringPrompt } from './ai/scoring-prompt';
 import { generateAiScoring } from './ai/score-candidate';
-import { OLLAMA_MODEL } from './ai/client';
+import { ollama, OLLAMA_MODEL, OLLAMA_FAST_MODEL } from './ai/client';
 import { computePoolStats, computeDeterministicScores } from './ai/deterministic-scoring';
 
 import { CreateNoteDto } from './dto/create-note.dto';
@@ -417,6 +418,40 @@ export class ResumeService {
     return this.fileRepo.save(uploadedFile);
   }
 
+  private static readonly SAFE_EXT_MAP: Record<string, string> = {
+    jpeg: 'jpg', jpg: 'jpg', png: 'png', webp: 'webp',
+    bmp: 'bmp', tiff: 'tiff', gif: 'gif', pdf: 'pdf',
+  };
+
+  /**
+   * Save a file downloaded from a URL (image or PDF).
+   */
+  private async saveUrlDownload(
+    data: Buffer,
+    mimeType: string,
+  ): Promise<{ storedPath: string; savedFile: ResumeUploadedFile }> {
+    const uploadDir =
+      this.config.get<string>('RESUME_UPLOAD_DIR') || 'uploads/resume';
+    const absoluteUploadDir = join(process.cwd(), uploadDir);
+    await mkdir(absoluteUploadDir, { recursive: true });
+
+    const rawExt = mimeType.split('/')[1] || 'bin';
+    const ext =
+      ResumeService.SAFE_EXT_MAP[rawExt.toLowerCase()] || 'bin';
+    const storedName = `${Date.now()}_${uuidv4()}_url_download.${ext}`;
+    const storedPath = join(absoluteUploadDir, storedName);
+    await writeFile(storedPath, data);
+
+    const uploadedFile = this.fileRepo.create({
+      originalName: `url_download.${ext}`,
+      storedPath,
+      mimeType,
+      sizeBytes: data.length,
+    });
+    const savedFile = await this.fileRepo.save(uploadedFile);
+    return { storedPath, savedFile };
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   //  Text Extraction
   // ═══════════════════════════════════════════════════════════════════════════
@@ -437,6 +472,10 @@ export class ResumeService {
       case 'text/plain':
         return readFile(storedPath, 'utf-8');
 
+      case 'application/vnd.apple.pages':
+      case 'application/x-iwork-pages-sffpages':
+        return this.extractPagesText(storedPath);
+
       case 'application/msword':
         throw new BadRequestException(
           'Формат .doc не поддерживается. Сохраните в DOCX или PDF.',
@@ -444,9 +483,7 @@ export class ResumeService {
 
       default:
         if (IMAGE_MIME_TYPES.includes(mimeType)) {
-          throw new BadRequestException(
-            'Изображения пока не поддерживаются. Загрузите PDF или DOCX.',
-          );
+          return this.extractImageText(storedPath);
         }
         throw new BadRequestException(
           `Неподдерживаемый формат файла: ${mimeType}`,
@@ -484,6 +521,38 @@ export class ResumeService {
     const buffer = await readFile(filePath);
     const result = await mammoth.extractRawText({ buffer });
     return result.value;
+  }
+
+  /**
+   * Extract text from an image using Ollama Vision.
+   */
+  private async extractImageText(filePath: string): Promise<string> {
+    const { extractTextFromImage } = await import('./extractors/ocr');
+    const text = await extractTextFromImage(filePath);
+    if (!text || text.trim().length < 10) {
+      throw new BadRequestException(
+        'Не удалось распознать текст на изображении. Убедитесь, что фото чёткое и текст читаемый.',
+      );
+    }
+    return text;
+  }
+
+  /**
+   * Extract text from an Apple Pages (.pages) file.
+   * Pages is a ZIP archive containing QuickLook/Preview.pdf.
+   */
+  private async extractPagesText(filePath: string): Promise<string> {
+    const { extractTextFromPages } = await import('./extractors/pages');
+    const result = await extractTextFromPages(filePath);
+
+    try {
+      return await this.extractPdfText(result.value);
+    } finally {
+      const { unlink } = await import('fs/promises');
+      await unlink(result.value).catch((e) =>
+        this.logger.warn(`Не удалось удалить временный файл ${result.value}: ${e.message}`),
+      );
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -611,7 +680,25 @@ export class ResumeService {
         aiConfidence,
       });
 
-      // Step 6: AI Scoring (не блокирует основной pipeline)
+      // Step 6: Embedding
+      try {
+        const embCandidate = await this.candidateRepo.findOne({
+          where: { id: candidateId },
+          relations: ['workHistory', 'cmeCourses'],
+        });
+        if (embCandidate) {
+          const profileText = buildCandidateProfileText(embCandidate);
+          const embVector = await generateEmbedding(profileText);
+          await saveEmbedding(this.dataSource, candidateId, embVector);
+          this.logger.log(`Embedding generated for candidate ${candidateId}`);
+        }
+      } catch (embErr) {
+        this.logger.warn(
+          `Embedding failed for ${candidateId}: ${embErr instanceof Error ? embErr.message : 'unknown'}`,
+        );
+      }
+
+      // Step 7: AI Scoring (не блокирует основной pipeline)
       try {
         await this.scoreCandidateInternal(candidateId);
       } catch (scoreError) {
@@ -1159,6 +1246,311 @@ export class ResumeService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
+  //  Embeddings
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Массовая генерация эмбеддингов для кандидатов, у которых embedding IS NULL.
+   */
+  /**
+   * Запускает фоновую генерацию эмбеддингов. Возвращает управление сразу.
+   */
+  startEmbeddingGeneration(batchSize = 20): { message: string } {
+    const pending = this.dataSource.query(
+      `SELECT COUNT(*) as cnt FROM resume_candidates
+       WHERE embedding IS NULL AND priority NOT IN ('DELETED', 'ARCHIVE')
+         AND "processingStatus" = 'COMPLETED'`,
+    ).then((r) => Number(r[0]?.cnt || 0));
+
+    pending.then((count) => {
+      if (count === 0) {
+        this.logger.log('Все кандидаты уже имеют эмбеддинги');
+        return;
+      }
+      this.logger.log(`Запуск фоновой генерации эмбеддингов для ${count} кандидатов`);
+      this.generateMissingEmbeddings(batchSize).then((result) => {
+        this.logger.log(`Генерация эмбеддингов завершена: ${result.processed} обработано, ${result.errors} ошибок`);
+      }).catch((err) => {
+        this.logger.error(`Ошибка генерации эмбеддингов: ${err instanceof Error ? err.message : 'unknown'}`);
+      });
+    });
+
+    return { message: 'Генерация эмбеддингов запущена в фоне' };
+  }
+
+  async generateMissingEmbeddings(batchSize = 20): Promise<{ processed: number; errors: number }> {
+    let processed = 0;
+    let errors = 0;
+
+    while (true) {
+      const candidateRows: { id: string }[] = await this.dataSource.query(
+        `SELECT id FROM resume_candidates
+         WHERE embedding IS NULL
+           AND priority NOT IN ('DELETED', 'ARCHIVE')
+           AND "processingStatus" = 'COMPLETED'
+         ORDER BY "createdAt" DESC
+         LIMIT $1`,
+        [batchSize],
+      );
+
+      if (candidateRows.length === 0) break;
+
+      // Загружаем полные данные кандидатов параллельно
+      const candidates = (await Promise.all(
+        candidateRows.map(({ id }) =>
+          this.candidateRepo.findOne({ where: { id }, relations: ['workHistory', 'cmeCourses'] }),
+        ),
+      )).filter(Boolean) as ResumeCandidate[];
+
+      if (candidates.length === 0) break;
+
+      // Строим тексты профилей
+      const texts = candidates.map((c) => buildCandidateProfileText(c));
+
+      try {
+        // Batch-вызов Ollama — один запрос на весь batch
+        const embeddings = await generateEmbeddingsBatch(texts);
+
+        // Сохраняем параллельно
+        const saveResults = await Promise.allSettled(
+          candidates.map((c, i) => saveEmbedding(this.dataSource, c.id, embeddings[i])),
+        );
+
+        for (const r of saveResults) {
+          if (r.status === 'fulfilled') processed++;
+          else errors++;
+        }
+      } catch (err) {
+        this.logger.warn(`Batch embedding failed: ${err instanceof Error ? err.message : 'unknown'}`);
+        errors += candidates.length;
+      }
+    }
+
+    return { processed, errors };
+  }
+
+  /**
+   * Семантический поиск кандидатов через pgvector cosine distance.
+   */
+  async semanticSearch(
+    query: string,
+    limit = 20,
+    threshold = 0.65,
+    filters?: { specialization?: string; branch?: string; status?: string },
+  ) {
+    const expandedQuery = await expandSearchQuery(query);
+    this.logger.debug(`Semantic search: "${query}" → "${expandedQuery}"`);
+    const queryEmbedding = await generateEmbedding(expandedQuery);
+    const vectorStr = `[${queryEmbedding.join(',')}]`;
+
+    let sql = `
+      SELECT c.id, c."fullName", c.specialization, c."aiScore", c.phone, c.email,
+             c."qualificationCategory", c."totalExperienceYears", c.city, c.status, c.priority,
+             c."processingStatus", c.branches, c."doctorTypes",
+             (c.embedding <=> $1::vector) AS distance
+      FROM resume_candidates c
+      WHERE c.embedding IS NOT NULL
+        AND c.priority NOT IN ('DELETED', 'ARCHIVE')
+    `;
+    const params: unknown[] = [vectorStr];
+    let paramIndex = 2;
+
+    if (filters?.specialization) {
+      sql += ` AND c.specialization = $${paramIndex}`;
+      params.push(filters.specialization);
+      paramIndex++;
+    }
+    if (filters?.branch) {
+      sql += ` AND $${paramIndex} = ANY(c.branches)`;
+      params.push(filters.branch);
+      paramIndex++;
+    }
+    if (filters?.status) {
+      sql += ` AND c.status = $${paramIndex}`;
+      params.push(filters.status);
+      paramIndex++;
+    }
+
+    sql += ` AND (c.embedding <=> $1::vector) < $${paramIndex}`;
+    params.push(threshold);
+    paramIndex++;
+
+    sql += ` ORDER BY distance ASC LIMIT $${paramIndex}`;
+    params.push(limit);
+
+    const rows = await this.dataSource.query(sql, params);
+
+    return {
+      data: rows.map((r: Record<string, unknown>) => ({
+        ...r,
+        distance: Number(r.distance),
+        similarity: Math.round((1 - Number(r.distance)) * 100) / 100,
+      })),
+      query,
+      expandedQuery,
+      total: rows.length,
+    };
+  }
+
+  /**
+   * Найти N ближайших кандидатов по embedding cosine distance.
+   */
+  async findSimilarByEmbedding(
+    candidateId: string,
+    limit = 5,
+    maxDistance = 0.4,
+  ) {
+    const [candidateEmb] = await this.dataSource.query(
+      `SELECT embedding FROM resume_candidates WHERE id = $1`,
+      [candidateId],
+    );
+
+    if (!candidateEmb?.embedding) {
+      return [];
+    }
+
+    const rows = await this.dataSource.query(
+      `SELECT c.id, c."fullName", c.specialization, c."aiScore",
+              (c.embedding <=> (SELECT embedding FROM resume_candidates WHERE id = $1)) AS distance
+       FROM resume_candidates c
+       WHERE c.id != $1
+         AND c.embedding IS NOT NULL
+         AND c.priority NOT IN ('DELETED', 'ARCHIVE')
+         AND (c.embedding <=> (SELECT embedding FROM resume_candidates WHERE id = $1)) < $2
+       ORDER BY distance ASC
+       LIMIT $3`,
+      [candidateId, maxDistance, limit],
+    );
+
+    return rows.map((r: Record<string, unknown>) => ({
+      id: r.id,
+      fullName: r.fullName,
+      specialization: r.specialization,
+      aiScore: r.aiScore,
+      distance: Number(r.distance),
+      similarity: Math.round((1 - Number(r.distance)) * 100) / 100,
+    }));
+  }
+
+  /**
+   * Найти похожих кандидатов через embedding для контекста скоринга.
+   * Возвращает compact profiles (как findSimilarBySQL).
+   */
+  private async findSimilarCandidatesForScoring(
+    candidateId: string,
+    limit: number,
+  ): Promise<string[]> {
+    const rows = await this.dataSource.query(
+      `SELECT c.id FROM resume_candidates c
+       WHERE c.id != $1
+         AND c.embedding IS NOT NULL
+         AND c.priority NOT IN ('DELETED', 'ARCHIVE')
+       ORDER BY c.embedding <=> (SELECT embedding FROM resume_candidates WHERE id = $1)
+       LIMIT $2`,
+      [candidateId, limit],
+    );
+
+    if (rows.length === 0) throw new Error('No embeddings available');
+
+    const ids = rows.map((r: { id: string }) => r.id);
+    const candidates = await this.candidateRepo.find({
+      where: { id: In(ids) },
+      relations: ['workHistory'],
+    });
+
+    return candidates.map(c => buildCompactProfile(c));
+  }
+
+  /**
+   * Кластеризация кандидатов по embedding-ам (k-means).
+   */
+  async clusterCandidates(
+    k?: number,
+    filters?: { specialization?: string; branch?: string },
+  ) {
+    let sql = `
+      SELECT id, embedding::text as embedding
+      FROM resume_candidates
+      WHERE embedding IS NOT NULL
+        AND priority NOT IN ('DELETED', 'ARCHIVE')
+    `;
+    const params: unknown[] = [];
+    let paramIndex = 1;
+
+    if (filters?.specialization) {
+      sql += ` AND specialization = $${paramIndex}`;
+      params.push(filters.specialization);
+      paramIndex++;
+    }
+    if (filters?.branch) {
+      sql += ` AND $${paramIndex} = ANY(branches)`;
+      params.push(filters.branch);
+      paramIndex++;
+    }
+
+    const rows: { id: string; embedding: string }[] = await this.dataSource.query(sql, params);
+
+    if (rows.length === 0) {
+      return { clusters: [], totalCandidates: 0, k: 0 };
+    }
+
+    const points = rows.map(r => ({
+      id: r.id,
+      embedding: r.embedding.replace(/[\[\]]/g, '').split(',').map(Number),
+    }));
+
+    const actualK = k || suggestK(points.length);
+    const clusterResults = kMeansClustering(points, actualK);
+
+    // Обогатить данные
+    const allIds = points.map(p => p.id);
+    const candidates = await this.candidateRepo.find({
+      where: { id: In(allIds) },
+      select: ['id', 'fullName', 'specialization', 'aiScore'],
+    });
+    const candidateMap = new Map(candidates.map(c => [c.id, c]));
+
+    const enrichedClusters = clusterResults.map(cluster => {
+      const clusterCandidates = cluster.candidateIds
+        .map(id => candidateMap.get(id))
+        .filter(Boolean) as ResumeCandidate[];
+
+      const specCounts = new Map<string, number>();
+      for (const c of clusterCandidates) {
+        const spec = c.specialization || 'Без специализации';
+        specCounts.set(spec, (specCounts.get(spec) || 0) + 1);
+      }
+      const topSpecializations = [...specCounts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([name, count]) => ({ name, count }));
+
+      const label = topSpecializations.length > 0
+        ? topSpecializations[0].name + (topSpecializations.length > 1 ? ' и др.' : '')
+        : `Кластер ${cluster.clusterId + 1}`;
+
+      return {
+        clusterId: cluster.clusterId,
+        label,
+        size: cluster.size,
+        candidates: clusterCandidates.map(c => ({
+          id: c.id,
+          fullName: c.fullName,
+          specialization: c.specialization,
+          aiScore: c.aiScore,
+        })),
+        topSpecializations,
+      };
+    });
+
+    return {
+      clusters: enrichedClusters,
+      totalCandidates: points.length,
+      k: actualK,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
   //  Create Candidate from Raw Text
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1200,6 +1592,115 @@ export class ResumeService {
     this.enqueueProcessing(saved.id);
 
     return { candidateId: saved.id, fileName: file.originalname };
+  }
+
+  /**
+   * Create a candidate from a URL (link to a resume page).
+   * Scrapes the page, extracts text, and enqueues processing.
+   */
+  async createCandidateFromUrl(
+    url: string,
+  ): Promise<{ candidateId: string; url: string }> {
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        throw new Error();
+      }
+    } catch {
+      throw new BadRequestException(
+        'Некорректный URL. Укажите ссылку, начинающуюся с http:// или https://',
+      );
+    }
+
+    const candidate = this.candidateRepo.create({
+      fullName: `Загрузка с ${parsedUrl.hostname}...`,
+      processingStatus: ResumeProcessingStatus.PENDING,
+      branches: [],
+    });
+    const saved = await this.candidateRepo.save(candidate);
+
+    void this.processUrl(saved.id, url);
+
+    return { candidateId: saved.id, url };
+  }
+
+  /**
+   * Background URL processing: scrape → extract text → processCandidate.
+   */
+  private async processUrl(
+    candidateId: string,
+    url: string,
+  ): Promise<void> {
+    try {
+      await this.candidateRepo.update(candidateId, {
+        processingStatus: ResumeProcessingStatus.EXTRACTING,
+      });
+
+      const { scrapeUrl } = await import('./extractors/url-scraper');
+      const result = await scrapeUrl(url);
+
+      let rawText: string;
+
+      if (result.contentType === 'html') {
+        // HTML → cheerio уже извлёк текст, AI чистит от мусора
+        const pageText = result.text || '';
+        if (pageText.length < 50) {
+          throw new Error(
+            `Не удалось извлечь текст со страницы (${result.siteType})`,
+          );
+        }
+
+        // Для известных сайтов (hh.ru) текст уже чистый, для остальных — AI
+        if (result.siteType === 'hh') {
+          rawText = pageText;
+        } else {
+          const { extractResumeFromPageText } = await import(
+            './extractors/url-ai-extractor'
+          );
+          rawText = await extractResumeFromPageText(pageText);
+        }
+      } else if (result.contentType === 'image' || result.contentType === 'pdf') {
+        // Бинарный контент → сохранить файл → парсинг
+        const { storedPath, savedFile } = await this.saveUrlDownload(
+          result.data!,
+          result.mimeType,
+        );
+        await this.candidateRepo.update(candidateId, {
+          uploadedFileId: savedFile.id,
+        });
+
+        if (result.contentType === 'image') {
+          const { extractTextFromImage } = await import('./extractors/ocr');
+          rawText = await extractTextFromImage(storedPath);
+        } else {
+          rawText = await this.extractPdfText(storedPath);
+        }
+      } else {
+        throw new Error('Неподдерживаемый тип контента по URL');
+      }
+
+      if (!rawText || rawText.trim().length < 20) {
+        throw new Error(
+          'Не удалось извлечь текст резюме со страницы',
+        );
+      }
+
+      await this.candidateRepo.update(candidateId, {
+        rawText: rawText.trim(),
+      });
+      await this.processCandidate(candidateId);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Ошибка загрузки по URL';
+      this.logger.error(
+        `URL processing failed for ${candidateId}: ${message}`,
+      );
+      await this.candidateRepo.update(candidateId, {
+        processingStatus: ResumeProcessingStatus.FAILED,
+        processingError: message,
+      });
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -2931,13 +3432,18 @@ export class ResumeService {
     // 3. Рассчитать детерминированные sub-scores
     const detScores = computeDeterministicScores(candidate, poolStats);
 
-    // 4. Найти похожих кандидатов через SQL
-    const similarProfiles = await this.findSimilarBySQL(
-      candidateId,
-      candidate.specialization,
-      candidate.totalExperienceYears,
-      7,
-    );
+    // 4. Найти похожих кандидатов (embedding-first, fallback на SQL)
+    let similarProfiles: string[];
+    try {
+      similarProfiles = await this.findSimilarCandidatesForScoring(candidateId, 7);
+    } catch {
+      similarProfiles = await this.findSimilarBySQL(
+        candidateId,
+        candidate.specialization,
+        candidate.totalExperienceYears,
+        7,
+      );
+    }
 
     // 5. Получить rawText
     const rawText = candidate.rawText || null;

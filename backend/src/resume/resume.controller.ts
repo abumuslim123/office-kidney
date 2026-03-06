@@ -54,6 +54,15 @@ export class ResumeController {
     return this.resumeService.createCandidateFromFile(file);
   }
 
+  @Post('upload-url')
+  @Permissions('hr', 'hr_resume_edit')
+  async uploadFromUrl(@Body() body: { url: string }) {
+    if (!body?.url?.trim()) {
+      throw new BadRequestException('URL не предоставлен');
+    }
+    return this.resumeService.createCandidateFromUrl(body.url.trim());
+  }
+
   @Get('files/:id')
   async getFile(@Param('id') id: string, @Res() res: Response) {
     const fileRecord = await this.resumeService.getFileRecord(id);
@@ -184,6 +193,47 @@ export class ResumeController {
     });
   }
 
+  @Get('candidates/search/semantic')
+  semanticSearch(
+    @Query('q') q: string,
+    @Query('limit') limit?: string,
+    @Query('threshold') threshold?: string,
+    @Query('specialization') specialization?: string,
+    @Query('branch') branch?: string,
+    @Query('status') status?: string,
+  ) {
+    if (!q?.trim()) {
+      throw new BadRequestException('Параметр q обязателен');
+    }
+    return this.resumeService.semanticSearch(
+      q.trim(),
+      limit ? Math.min(Math.max(Number(limit), 1), 100) : 20,
+      threshold ? Number(threshold) : 0.65,
+      { specialization, branch, status },
+    );
+  }
+
+  @Get('candidates/clusters')
+  clusterCandidates(
+    @Query('k') k?: string,
+    @Query('specialization') specialization?: string,
+    @Query('branch') branch?: string,
+  ) {
+    return this.resumeService.clusterCandidates(
+      k ? Math.min(Math.max(Number(k), 1), 20) : undefined,
+      { specialization, branch },
+    );
+  }
+
+  @Post('embeddings/generate')
+  @Permissions('hr', 'hr_resume_edit')
+  @HttpCode(HttpStatus.OK)
+  generateEmbeddings(@Query('batchSize') batchSize?: string) {
+    return this.resumeService.startEmbeddingGeneration(
+      batchSize ? Math.min(Math.max(Number(batchSize), 1), 100) : 20,
+    );
+  }
+
   @Get('candidates/:id')
   findCandidateById(@Param('id') id: string) {
     return this.resumeService.findCandidateById(id);
@@ -232,6 +282,17 @@ export class ResumeController {
     }
     await this.resumeService.supplementCandidate(id, text);
     return { success: true };
+  }
+
+  @Get('candidates/:id/similar')
+  findSimilar(
+    @Param('id') id: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.resumeService.findSimilarByEmbedding(
+      id,
+      limit ? Math.min(Math.max(Number(limit), 1), 20) : 5,
+    );
   }
 
   @Get('candidates/:id/score')

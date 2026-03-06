@@ -28,7 +28,7 @@ export default function ResumeDropzone({ onUploaded }: Props) {
         .flat()
         .some((ext) => file.name.toLowerCase().endsWith(ext));
       if (!mimeOk && !extOk) {
-        setError('Неподдерживаемый формат файла. Допустимы: PDF, DOCX, TXT');
+        setError('Неподдерживаемый формат файла. Допустимы: PDF, DOCX, TXT, JPG, PNG, Pages');
         return;
       }
       setUploading(true);
@@ -96,7 +96,7 @@ export default function ResumeDropzone({ onUploaded }: Props) {
             <p className="text-sm text-gray-600 font-medium">
               Перетащите файл резюме или нажмите для выбора
             </p>
-            <p className="text-xs text-gray-400 mt-1">PDF, DOCX, TXT — до 10 МБ</p>
+            <p className="text-xs text-gray-400 mt-1">PDF, DOCX, TXT, JPG, PNG, Pages — до 10 МБ</p>
           </>
         )}
       </div>

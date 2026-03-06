@@ -4,6 +4,7 @@ import type { ResumeCandidate } from '../lib/resume-types';
 import { ResumeProcessingStatus } from '../lib/resume-types';
 import ResumeDropzone from '../components/resume/ResumeDropzone';
 import ResumeTextPasteArea from '../components/resume/ResumeTextPasteArea';
+import ResumeUrlInput from '../components/resume/ResumeUrlInput';
 import ResumeFileList from '../components/resume/ResumeFileList';
 
 export default function ResumeUploadPage() {
@@ -79,6 +80,11 @@ export default function ResumeUploadPage() {
           <div className="bg-white border border-gray-200 rounded-xl p-4">
             <h3 className="text-sm font-medium text-gray-900 mb-3">Вставить текст</h3>
             <ResumeTextPasteArea onCreated={loadRecent} />
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-xl p-4">
+            <h3 className="text-sm font-medium text-gray-900 mb-3">Загрузить по ссылке</h3>
+            <ResumeUrlInput onCreated={loadRecent} />
           </div>
         </div>
 
