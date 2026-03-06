@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { ensureProcessPushSubscription } from './lib/processPush';
 import Login from './pages/Login';
@@ -32,12 +32,25 @@ import ResumeArchivePage from './pages/ResumeArchivePage';
 import ResumeTrashPage from './pages/ResumeTrashPage';
 import ResumeApplyPublic from './pages/ResumeApplyPublic';
 import ResumeApplySuccess from './pages/ResumeApplySuccess';
+import HrHunter from './pages/HrHunter';
 import ProtectedRoute from './components/ProtectedRoute';
 
 const resumeEnabled = import.meta.env.VITE_FEATURE_RESUME !== 'false';
 
 function App() {
   const { isAuthenticated, isLoading, user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // OAuth callback: redirect ?code= from root to /hr/hunter
+  useEffect(() => {
+    if (location.pathname !== '/') return;
+    const params = new URLSearchParams(location.search);
+    const code = params.get('code');
+    if (code) {
+      navigate(`/hr/hunter?code=${encodeURIComponent(code)}`, { replace: true });
+    }
+  }, [location.pathname, location.search, navigate]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -82,6 +95,7 @@ function App() {
         <Route path="settings" element={<ProtectedRoute permissions={['processes_edit']}><Settings /></ProtectedRoute>} />
         <Route path="calls/topics" element={<ProtectedRoute permissions={['calls_manage_topics']}><CallTopics /></ProtectedRoute>} />
         <Route path="calls/settings" element={<ProtectedRoute permissions={['calls_settings']}><CallsSettings /></ProtectedRoute>} />
+        <Route path="hr/hunter" element={<ProtectedRoute permissions={['hr']}><HrHunter /></ProtectedRoute>} />
         <Route path="hr" element={<ProtectedRoute permissions={['hr']}><HR /></ProtectedRoute>} />
         <Route path="hr/events" element={<ProtectedRoute permissions={['hr']}><HrEvents /></ProtectedRoute>} />
         <Route path="hr/folder/:folderId" element={<ProtectedRoute permissions={['hr']}><HR /></ProtectedRoute>} />

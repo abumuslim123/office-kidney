@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 const resumeEnabled = import.meta.env.VITE_FEATURE_RESUME !== 'false';
 
 type HrTabsProps = {
-  active?: 'lists' | 'events' | 'resume';
+  active?: 'hunter' | 'lists' | 'events' | 'resume';
 };
 
 export default function HrTabs({ active }: HrTabsProps) {
@@ -14,6 +14,9 @@ export default function HrTabs({ active }: HrTabsProps) {
 
   return (
     <div className="flex gap-2 mb-4 border-b border-gray-200 pb-2">
+      <NavLink to="/hr/hunter" className={({ isActive }) => linkClass(isActive, active === 'hunter')}>
+        Хантер
+      </NavLink>
       <NavLink to="/hr" end className={({ isActive }) => linkClass(isActive, active === 'lists')}>
         Списки
       </NavLink>

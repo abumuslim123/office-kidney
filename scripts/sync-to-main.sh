@@ -71,6 +71,18 @@ else
   git commit -m "chore: sync from develop for production"
   git push "$REMOTE" "$MAIN_BRANCH"
   echo "Pushed to $REMOTE/$MAIN_BRANCH"
+
+  # Run DB backup before deploying new version
+  echo "Running pre-deploy DB backup..."
+  COMPOSE_FILE="${COMPOSE_FILE:-docker/docker-compose.prod.yml}"
+  ENV_FILE="${ENV_FILE:-.env.production}"
+  if docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" exec -T db_backup /usr/local/bin/backup-db.sh 2>/dev/null; then
+    echo "Pre-deploy DB backup completed."
+  elif docker-compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" exec -T db_backup /usr/local/bin/backup-db.sh 2>/dev/null; then
+    echo "Pre-deploy DB backup completed."
+  else
+    echo "Warning: DB backup failed or db_backup container is not running. Skipping."
+  fi
 fi
 
 git checkout "$DEVELOP_BRANCH"

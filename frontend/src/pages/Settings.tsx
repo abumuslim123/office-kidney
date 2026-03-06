@@ -10,6 +10,13 @@ type PolzaSettings = {
   availableModels: string[];
 };
 
+type BackupStatus = {
+  hasBackupToday: boolean;
+  lastBackup: string | null;
+  lastBackupSize: number | null;
+  backupCount: number;
+};
+
 const DEFAULT_BASE_URL = 'https://api.polza.ai';
 
 export default function Settings() {
@@ -22,6 +29,8 @@ export default function Settings() {
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
   const [model, setModel] = useState('');
   const [clearKey, setClearKey] = useState(false);
+
+  const [backupStatus, setBackupStatus] = useState<BackupStatus | null>(null);
 
   const userPermissions = user?.permissions?.map((p) => p.slug) || [];
   const canEditProcesses = userPermissions.includes('processes_edit');
@@ -47,8 +56,18 @@ export default function Settings() {
     }
   };
 
+  const loadBackupStatus = async () => {
+    try {
+      const res = await api.get<BackupStatus>('/health/backup-status');
+      setBackupStatus(res.data);
+    } catch {
+      // ignore — endpoint may not be available in dev
+    }
+  };
+
   useEffect(() => {
     load();
+    loadBackupStatus();
   }, [canEditProcesses]);
 
   const savePolza = async (e: React.FormEvent) => {
@@ -104,6 +123,42 @@ export default function Settings() {
         <p className="text-gray-500">Загрузка...</p>
       ) : (
         <div className="space-y-6">
+          {backupStatus && (
+            <section className="bg-white border border-gray-200 rounded-lg p-4 max-w-2xl">
+              <h3 className="text-sm font-medium text-gray-700 mb-3">Бэкап базы данных</h3>
+              <div className="flex items-center gap-3">
+                <span
+                  className={`inline-block w-3 h-3 rounded-full ${
+                    backupStatus.hasBackupToday
+                      ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]'
+                      : 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.6)]'
+                  }`}
+                />
+                <span className="text-sm text-gray-700">
+                  {backupStatus.hasBackupToday ? 'Бэкап за сегодня есть' : 'Бэкап за сегодня отсутствует'}
+                </span>
+              </div>
+              {backupStatus.lastBackup && (
+                <div className="mt-2 text-xs text-gray-500 space-y-0.5">
+                  <p>
+                    Последний бэкап:{' '}
+                    {new Date(backupStatus.lastBackup).toLocaleString('ru-RU', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </p>
+                  {backupStatus.lastBackupSize !== null && (
+                    <p>Размер: {(backupStatus.lastBackupSize / 1024 / 1024).toFixed(2)} МБ</p>
+                  )}
+                  <p>Всего бэкапов: {backupStatus.backupCount}</p>
+                </div>
+              )}
+            </section>
+          )}
+
           <section className="bg-white border border-gray-200 rounded-lg p-4 max-w-2xl">
             <h3 className="text-sm font-medium text-gray-700 mb-3">Чек-листы процессов (Polza.ai)</h3>
             <p className="text-xs text-gray-500 mb-4">

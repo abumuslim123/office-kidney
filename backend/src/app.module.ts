@@ -39,6 +39,7 @@ import { ProcessesModule } from './processes/processes.module';
 import { AddResumeModule1741000000000 } from './migrations/1741000000000-AddResumeModule';
 import { AddResumePermissions1741000001000 } from './migrations/1741000001000-AddResumePermissions';
 import { ResumeModule } from './resume/resume.module';
+import { HunterModule } from './hunter/hunter.module';
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { ResumeModule } from './resume/resume.module';
     CallsModule,
     ProcessesModule,
     ResumeModule,
+    HunterModule,
   ],
 })
 export class AppModule implements OnModuleInit {
