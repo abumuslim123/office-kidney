@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { Bot } from 'grammy';
 import { AppModule } from '../app.module';
 import { ResumeService } from './resume.service';
+import { evaluateParsingQuality } from './ai/parse-cv';
 import type { CvParsedOutput } from './ai/schemas';
 
 // ---------------------------------------------------------------------------
@@ -344,6 +345,18 @@ async function processFile(
     // 5. Duplicate detection
     const dupResult = await service.checkDuplicates(candidateId);
 
+    // 5.5. Independent quality evaluation
+    let aiConfidence = 0.5;
+    try {
+      const evaluation = await evaluateParsingQuality(rawText, parsed);
+      aiConfidence = evaluation.score;
+    } catch (evalError) {
+      console.warn(
+        `Quality evaluation failed for ${candidateId}:`,
+        evalError instanceof Error ? evalError.message : evalError,
+      );
+    }
+
     if (dupResult.status === 'exact_duplicate_deleted') {
       const locationMap: Record<string, string> = {
         candidates: 'в базе кандидатов',
@@ -355,7 +368,7 @@ async function processFile(
       await service.setCandidateProcessingStatus(
         candidateId,
         'COMPLETED',
-        (parsed as any).confidence,
+        aiConfidence,
       );
       await ctx.reply(
         `Обнаружен точный дубликат (совпадение ${Math.round((dupResult.similarity ?? 0) * 100)}%). ` +
@@ -382,12 +395,22 @@ async function processFile(
     await service.setCandidateProcessingStatus(
       candidateId,
       'COMPLETED',
-      (parsed as any).confidence,
+      aiConfidence,
     );
 
     // 6. Send summary to chat
     const summary = formatSummary(parsed);
     await ctx.reply(summary);
+
+    // 7. AI Scoring (не блокирует ответ пользователю)
+    try {
+      await service.recalculateScore(candidateId);
+    } catch (scoreError) {
+      console.warn(
+        `AI scoring failed for ${candidateId}:`,
+        scoreError instanceof Error ? scoreError.message : scoreError,
+      );
+    }
   } catch (error) {
     console.error('Telegram bot processing error:', error);
     await ctx.reply(

@@ -143,6 +143,8 @@ services:
       NODE_ENV: production
       DB_HOST: postgres
       DB_PORT: 5432
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://141.105.65.20:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:32b}
     volumes:
       - ../backend/uploads:/app/uploads
     depends_on:
