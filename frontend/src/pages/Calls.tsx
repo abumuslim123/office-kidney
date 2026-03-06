@@ -24,6 +24,10 @@ type CallTranscript = {
   operatorText?: string | null;
   abonentText?: string | null;
   turns?: { speaker: string; text: string }[] | null;
+  sentiment?: {
+    operator: string | null;
+    abonent: string | null;
+  } | null;
   language: string | null;
   provider: string;
   createdAt: string;
@@ -194,6 +198,20 @@ const formatSeconds = (value?: number) => {
   const minutes = Math.floor(total / 60);
   const seconds = total % 60;
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
+};
+
+const SENTIMENT_EMOJI: Record<string, string> = {
+  positive: '😊',
+  negative: '😠',
+  neutral: '😐',
+  angry: '🤬',
+  happy: '😄',
+  sad: '😢',
+};
+
+const sentimentEmoji = (val: string | null | undefined): string => {
+  if (!val) return '';
+  return SENTIMENT_EMOJI[val.toLowerCase()] || val;
 };
 
 const statusLabel: Record<string, string> = {
@@ -466,6 +484,12 @@ export default function Calls() {
             <IconTag />
             Тематики
           </Link>
+          <Link
+            to="/calls/dictionary"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            Словарь
+          </Link>
         </div>
       </div>
 
@@ -680,6 +704,7 @@ export default function Calls() {
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Клиент</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Длительность</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Тематики</th>
+                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Эмоции</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Статус</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Действия</th>
               </tr>
@@ -728,6 +753,17 @@ export default function Calls() {
                               </span>
                             ))}
                           </div>
+                        ) : (
+                          <span className="text-gray-300">&mdash;</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {call.transcript?.sentiment ? (
+                          <span className="text-base" title={`Оператор: ${call.transcript.sentiment.operator || '—'}, Клиент: ${call.transcript.sentiment.abonent || '—'}`}>
+                            {sentimentEmoji(call.transcript.sentiment.operator)}
+                            {call.transcript.sentiment.operator && call.transcript.sentiment.abonent ? ' ' : ''}
+                            {sentimentEmoji(call.transcript.sentiment.abonent)}
+                          </span>
                         ) : (
                           <span className="text-gray-300">&mdash;</span>
                         )}

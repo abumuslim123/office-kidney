@@ -21,6 +21,8 @@ import ScreensSettings from './pages/ScreensSettings';
 import Calls from './pages/Calls';
 import CallDetail from './pages/CallDetail';
 import CallTopics from './pages/CallTopics';
+import CallDictionary from './pages/CallDictionary';
+import CallSpeakers from './pages/CallSpeakers';
 import CallsSettings from './pages/CallsSettings';
 import Processes from './pages/Processes';
 import Settings from './pages/Settings';
@@ -82,6 +84,8 @@ function App() {
         <Route path="processes" element={<ProtectedRoute permissions={['processes_view']}><Processes /></ProtectedRoute>} />
         <Route path="settings" element={<ProtectedRoute permissions={['processes_edit']}><Settings /></ProtectedRoute>} />
         <Route path="calls/topics" element={<ProtectedRoute permissions={['calls_manage_topics']}><CallTopics /></ProtectedRoute>} />
+        <Route path="calls/dictionary" element={<ProtectedRoute permissions={['calls_manage_topics']}><CallDictionary /></ProtectedRoute>} />
+        <Route path="calls/speakers" element={<ProtectedRoute permissions={['calls_settings']}><CallSpeakers /></ProtectedRoute>} />
         <Route path="calls/settings" element={<ProtectedRoute permissions={['calls_settings']}><CallsSettings /></ProtectedRoute>} />
         <Route path="hr" element={<Navigate to="/hr/hunter" replace />} />
         <Route path="hr/hunter" element={<ProtectedRoute permissions={['hr']}><HrHunter /></ProtectedRoute>} />

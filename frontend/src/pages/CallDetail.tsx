@@ -5,6 +5,12 @@ import AudioPlayer, { type AudioPlayerHandle } from '../components/calls/AudioPl
 import TranscriptChat from '../components/calls/TranscriptChat';
 import TopicsPanel from '../components/calls/TopicsPanel';
 
+type CallSentiment = {
+  operator: string | null;
+  abonent: string | null;
+  perTurn: { speaker: string; sentiment: string; confidence?: number }[] | null;
+};
+
 type CallTranscript = {
   id: string;
   callId: string;
@@ -13,6 +19,7 @@ type CallTranscript = {
   abonentText?: string | null;
   turns?: { speaker: string; text: string; start?: number; end?: number }[] | null;
   words?: { word: string; start: number; end: number; speaker: string }[] | null;
+  sentiment?: CallSentiment | null;
   language: string | null;
   provider: string;
 };
@@ -38,6 +45,20 @@ type CallData = {
   transcript: CallTranscript | null;
   matches: CallMatch[];
 };
+
+const SENTIMENT_MAP: Record<string, { emoji: string; label: string; color: string }> = {
+  positive: { emoji: '😊', label: 'позитив', color: 'text-green-600' },
+  negative: { emoji: '😠', label: 'негатив', color: 'text-red-600' },
+  neutral: { emoji: '😐', label: 'нейтрально', color: 'text-gray-500' },
+  angry: { emoji: '🤬', label: 'раздражение', color: 'text-red-600' },
+  happy: { emoji: '😄', label: 'радость', color: 'text-green-600' },
+  sad: { emoji: '😢', label: 'грусть', color: 'text-blue-600' },
+};
+
+function sentimentLabel(sentiment: string): string {
+  const s = SENTIMENT_MAP[sentiment.toLowerCase()];
+  return s ? `${s.emoji} ${s.label}` : sentiment;
+}
 
 function formatDuration(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -180,6 +201,26 @@ export default function CallDetail() {
                   <>
                     <span className="text-gray-300">|</span>
                     <span>речь {formatDuration(call.speechDurationSeconds)}</span>
+                  </>
+                )}
+                {call.transcript?.sentiment && (
+                  <>
+                    {call.transcript.sentiment.operator && (
+                      <>
+                        <span className="text-gray-300">|</span>
+                        <span className={SENTIMENT_MAP[call.transcript.sentiment.operator.toLowerCase()]?.color} title="Эмоция оператора">
+                          {sentimentLabel(call.transcript.sentiment.operator)} оператор
+                        </span>
+                      </>
+                    )}
+                    {call.transcript.sentiment.abonent && (
+                      <>
+                        <span className="text-gray-300">|</span>
+                        <span className={SENTIMENT_MAP[call.transcript.sentiment.abonent.toLowerCase()]?.color} title="Эмоция собеседника">
+                          {sentimentLabel(call.transcript.sentiment.abonent)} собеседник
+                        </span>
+                      </>
+                    )}
                   </>
                 )}
               </div>

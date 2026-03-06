@@ -8,6 +8,8 @@ import { Call } from './entities/call.entity';
 import { CallTranscript } from './entities/call-transcript.entity';
 import { CallTopic } from './entities/call-topic.entity';
 import { CallTopicMatch } from './entities/call-topic-match.entity';
+import { CallDictionaryEntry } from './entities/call-dictionary-entry.entity';
+import { CallSpeaker } from './entities/call-speaker.entity';
 import { AppSetting } from '../settings/entities/app-setting.entity';
 import {
   CALLS_AUDIO_API_BASE,
@@ -21,8 +23,13 @@ import {
   CALLS_SPEECHKIT_API_KEY,
   CALLS_SPEECHKIT_FOLDER_ID,
   CALLS_PROVIDER,
+  CALLS_TRITECH_CLIENT_ID,
+  CALLS_TRITECH_CLIENT_SECRET,
+  CALLS_TRITECH_USERNAME,
+  CALLS_TRITECH_PASSWORD,
 } from './calls-settings.constants';
 import { AitunnelAudioService } from './aitunnel-audio.service';
+import { TritechAudioService } from './tritech-audio.service';
 import { splitStereoAudioToMonoFiles, preprocessAudioForTranscription, getAudioDurationSeconds } from './wav-channel-splitter';
 
 type CallFilters = {
@@ -57,10 +64,15 @@ export class CallsService {
     private topicRepo: Repository<CallTopic>,
     @InjectRepository(CallTopicMatch)
     private matchRepo: Repository<CallTopicMatch>,
+    @InjectRepository(CallDictionaryEntry)
+    private dictRepo: Repository<CallDictionaryEntry>,
+    @InjectRepository(CallSpeaker)
+    private speakerRepo: Repository<CallSpeaker>,
     @InjectRepository(AppSetting)
     private settingsRepo: Repository<AppSetting>,
     private config: ConfigService,
     private audioProvider: AitunnelAudioService,
+    private tritechProvider: TritechAudioService,
   ) {
     const base = this.config.get<string>('CALLS_AUDIO_DIR') || path.join(process.cwd(), 'uploads', 'calls');
     this.audioDir = path.isAbsolute(base) ? base : path.join(process.cwd(), base);
@@ -437,6 +449,8 @@ export class CallsService {
     provider: string;
     speechkitConfigured: boolean;
     speechkitFolderIdMask?: string;
+    tritechConfigured: boolean;
+    tritechUsernameMask?: string;
   }> {
     const apiKey = await this.getSetting(CALLS_AUDIO_API_KEY);
     const apiBaseRaw = await this.getSetting(CALLS_AUDIO_API_BASE);
@@ -446,6 +460,10 @@ export class CallsService {
     const provider = (await this.getSetting(CALLS_PROVIDER)) || 'aitunnel';
     const speechkitKey = await this.getSetting(CALLS_SPEECHKIT_API_KEY);
     const speechkitFolderId = await this.getSetting(CALLS_SPEECHKIT_FOLDER_ID);
+
+    const tritechUsername = await this.getSetting(CALLS_TRITECH_USERNAME);
+    const tritechClientId = await this.getSetting(CALLS_TRITECH_CLIENT_ID);
+    const tritechConfigured = await this.tritechProvider.isConfigured();
 
     let apiKeyMask: string | undefined;
     if (apiKey) {
@@ -461,6 +479,13 @@ export class CallsService {
         : speechkitFolderId;
     }
 
+    let tritechUsernameMask: string | undefined;
+    if (tritechUsername) {
+      tritechUsernameMask = tritechUsername.length > 6
+        ? `${tritechUsername.slice(0, 3)}...`
+        : tritechUsername;
+    }
+
     return {
       apiKeyConfigured: Boolean(apiKey),
       apiKeyMask,
@@ -470,6 +495,8 @@ export class CallsService {
       provider,
       speechkitConfigured: Boolean(speechkitKey && speechkitFolderId),
       speechkitFolderIdMask,
+      tritechConfigured,
+      tritechUsernameMask,
     };
   }
 
@@ -481,6 +508,10 @@ export class CallsService {
     provider?: string;
     speechkitApiKey?: string;
     speechkitFolderId?: string;
+    tritechClientId?: string;
+    tritechClientSecret?: string;
+    tritechUsername?: string;
+    tritechPassword?: string;
   }) {
     const updates: Array<{ key: string; value: string | null }> = [];
 
@@ -502,7 +533,7 @@ export class CallsService {
       updates.push({ key: CALLS_AUDIO_MODEL, value: normalized || null });
     }
     if (data.provider !== undefined) {
-      const value = ['aitunnel', 'yandex'].includes(data.provider) ? data.provider : 'aitunnel';
+      const value = ['aitunnel', 'yandex', 'tritech'].includes(data.provider) ? data.provider : 'aitunnel';
       updates.push({ key: CALLS_PROVIDER, value });
     }
     if (data.speechkitApiKey !== undefined) {
@@ -512,6 +543,18 @@ export class CallsService {
     if (data.speechkitFolderId !== undefined) {
       const value = data.speechkitFolderId.trim();
       updates.push({ key: CALLS_SPEECHKIT_FOLDER_ID, value: value || null });
+    }
+    if (data.tritechClientId !== undefined) {
+      updates.push({ key: CALLS_TRITECH_CLIENT_ID, value: data.tritechClientId.trim() || null });
+    }
+    if (data.tritechClientSecret !== undefined) {
+      updates.push({ key: CALLS_TRITECH_CLIENT_SECRET, value: data.tritechClientSecret.trim() || null });
+    }
+    if (data.tritechUsername !== undefined) {
+      updates.push({ key: CALLS_TRITECH_USERNAME, value: data.tritechUsername.trim() || null });
+    }
+    if (data.tritechPassword !== undefined) {
+      updates.push({ key: CALLS_TRITECH_PASSWORD, value: data.tritechPassword.trim() || null });
     }
 
     await Promise.all(
@@ -565,6 +608,75 @@ export class CallsService {
     await this.topicRepo.remove(topic);
   }
 
+  private async transcribeCallWithTritech(call: Call, audioPath: string) {
+    const callId = call.id;
+    try {
+      const result = await this.tritechProvider.transcribeAudio(audioPath);
+
+      // Apply dictionary corrections
+      const corrected = await this.applyDictionaryCorrections(result);
+
+      let transcript = await this.transcriptRepo.findOne({ where: { callId } });
+      if (!transcript) {
+        transcript = this.transcriptRepo.create({
+          callId,
+          text: corrected.text,
+          operatorText: corrected.operatorText,
+          abonentText: corrected.abonentText,
+          turns: corrected.turns,
+          words: null,
+          language: 'ru',
+          provider: 'tritech',
+          sentiment: result.sentiment,
+        });
+      } else {
+        transcript.text = corrected.text;
+        transcript.operatorText = corrected.operatorText;
+        transcript.abonentText = corrected.abonentText;
+        transcript.turns = corrected.turns;
+        transcript.words = null;
+        transcript.language = 'ru';
+        transcript.provider = 'tritech';
+        transcript.sentiment = result.sentiment;
+      }
+      await this.transcriptRepo.save(transcript);
+
+      // Topic matching on operator text
+      await this.matchRepo.delete({ callId });
+      const matchesToSave: Partial<CallTopicMatch>[] = [];
+      const operatorSource = result.operatorText?.trim();
+      if (operatorSource) {
+        const topics = await this.topicRepo.find({ where: { isActive: true } });
+        topics.forEach((topic) => {
+          (topic.keywords || []).forEach((keyword) => {
+            const trimmed = keyword.trim();
+            if (!trimmed) return;
+            const occurrences = this.countOccurrences(operatorSource, trimmed);
+            if (occurrences > 0) {
+              matchesToSave.push({ callId, topicId: topic.id, keyword: trimmed, occurrences });
+            }
+          });
+        });
+        if (matchesToSave.length) {
+          await this.matchRepo.insert(matchesToSave);
+        }
+      }
+
+      if (result.duration > 0) call.durationSeconds = Math.round(result.duration);
+      if (result.speechDuration > 0) call.speechDurationSeconds = Math.round(result.speechDuration);
+      if (result.silenceDuration >= 0 && result.duration > 0) call.silenceDurationSeconds = Math.round(result.silenceDuration);
+
+      call.status = 'transcribed';
+      await this.callRepo.save(call);
+      return { call, transcript, matches: matchesToSave.length };
+    } catch (error) {
+      call.status = 'failed';
+      await this.callRepo.save(call);
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException('Ошибка транскрибации через 3iTech');
+    }
+  }
+
   async transcribeCall(callId: string) {
     const call = await this.callRepo.findOne({ where: { id: callId } });
     if (!call) throw new NotFoundException('Звонок не найден');
@@ -574,6 +686,12 @@ export class CallsService {
 
     call.status = 'transcribing';
     await this.callRepo.save(call);
+
+    // 3iTech provider — separate flow (async task-based API with native diarization)
+    const provider = await this.audioProvider.getProvider();
+    if (provider === 'tritech') {
+      return this.transcribeCallWithTritech(call, audioPath);
+    }
 
     const model =
       (await this.getSetting(CALLS_AUDIO_MODEL)) ||
@@ -902,6 +1020,136 @@ export class CallsService {
         await fs.unlink(cleanPath).catch(() => {});
       }
     }
+  }
+
+  // --- Dictionary corrections ---
+
+  private async applyDictionaryCorrections(result: {
+    text: string;
+    operatorText: string | null;
+    abonentText: string | null;
+    turns: { speaker: 'operator' | 'abonent'; text: string; start?: number; end?: number }[] | null;
+  }) {
+    const entries = await this.dictRepo.find({ where: { isActive: true } });
+    if (!entries.length) return result;
+
+    const applyReplacements = (text: string | null): string | null => {
+      if (!text) return text;
+      let corrected = text;
+      for (const entry of entries) {
+        const regex = new RegExp(entry.originalWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        corrected = corrected.replace(regex, entry.correctedWord);
+      }
+      return corrected;
+    };
+
+    const correctedText = applyReplacements(result.text) || result.text;
+    const correctedOperator = applyReplacements(result.operatorText);
+    const correctedAbonent = applyReplacements(result.abonentText);
+    const correctedTurns = result.turns?.map(t => ({
+      ...t,
+      text: applyReplacements(t.text) || t.text,
+    })) || null;
+
+    return {
+      text: correctedText,
+      operatorText: correctedOperator,
+      abonentText: correctedAbonent,
+      turns: correctedTurns,
+    };
+  }
+
+  async getDictionaryEntries() {
+    return this.dictRepo.find({ order: { createdAt: 'ASC' } });
+  }
+
+  async createDictionaryEntry(data: { originalWord: string; correctedWord: string; isActive?: boolean }) {
+    const entry = this.dictRepo.create({
+      originalWord: data.originalWord.trim(),
+      correctedWord: data.correctedWord.trim(),
+      isActive: data.isActive ?? true,
+    });
+    return this.dictRepo.save(entry);
+  }
+
+  async updateDictionaryEntry(id: string, data: { originalWord?: string; correctedWord?: string; isActive?: boolean }) {
+    const entry = await this.dictRepo.findOne({ where: { id } });
+    if (!entry) throw new NotFoundException('Запись словаря не найдена');
+    if (data.originalWord !== undefined) entry.originalWord = data.originalWord.trim();
+    if (data.correctedWord !== undefined) entry.correctedWord = data.correctedWord.trim();
+    if (data.isActive !== undefined) entry.isActive = data.isActive;
+    return this.dictRepo.save(entry);
+  }
+
+  async deleteDictionaryEntry(id: string) {
+    const entry = await this.dictRepo.findOne({ where: { id } });
+    if (!entry) throw new NotFoundException('Запись словаря не найдена');
+    await this.dictRepo.remove(entry);
+  }
+
+  // --- Speaker management ---
+
+  async getSpeakers() {
+    return this.speakerRepo.find({ order: { createdAt: 'ASC' } });
+  }
+
+  async createSpeaker(data: { name: string; description?: string }, audioFile: Express.Multer.File) {
+    // Save audio to temp file, upload to 3iTech, create speaker model
+    const tempDir = path.join(this.audioDir, '_speaker_temp');
+    await fs.mkdir(tempDir, { recursive: true });
+    const tempPath = path.join(tempDir, `speaker_${Date.now()}${path.extname(audioFile.originalname) || '.wav'}`);
+    await fs.writeFile(tempPath, audioFile.buffer);
+
+    try {
+      const fileId = await this.tritechProvider.uploadFilePublic(tempPath);
+      const model = await this.tritechProvider.createSpeakerModel(fileId, data.name, data.description);
+
+      const speaker = this.speakerRepo.create({
+        name: data.name,
+        tritechModelId: model.id,
+        status: model.ready ? 'ready' : 'training',
+        description: data.description || null,
+      });
+      return this.speakerRepo.save(speaker);
+    } finally {
+      await fs.unlink(tempPath).catch(() => {});
+    }
+  }
+
+  async deleteSpeaker(id: string) {
+    const speaker = await this.speakerRepo.findOne({ where: { id } });
+    if (!speaker) throw new NotFoundException('Диктор не найден');
+    if (speaker.tritechModelId) {
+      try {
+        await this.tritechProvider.deleteSpeakerModel(speaker.tritechModelId);
+      } catch {
+        // Model may already be deleted in 3iTech
+      }
+    }
+    await this.speakerRepo.remove(speaker);
+  }
+
+  async refreshSpeakerStatuses() {
+    const speakers = await this.speakerRepo.find();
+    if (!speakers.length) return speakers;
+    try {
+      const models = await this.tritechProvider.getSpeakerModels();
+      const modelMap = new Map(models.map(m => [m.id, m]));
+      for (const speaker of speakers) {
+        if (speaker.tritechModelId) {
+          const model = modelMap.get(speaker.tritechModelId);
+          if (model) {
+            speaker.status = model.ready ? 'ready' : 'training';
+          } else {
+            speaker.status = 'error';
+          }
+        }
+      }
+      await this.speakerRepo.save(speakers);
+    } catch {
+      // 3iTech may be unavailable
+    }
+    return speakers;
   }
 
   async deleteAudio(callId: string): Promise<void> {

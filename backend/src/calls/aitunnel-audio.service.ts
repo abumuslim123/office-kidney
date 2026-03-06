@@ -76,9 +76,11 @@ export class AitunnelAudioService {
     return value ? value : null;
   }
 
-  private async getProvider(): Promise<'aitunnel' | 'yandex'> {
+  async getProvider(): Promise<'aitunnel' | 'yandex' | 'tritech'> {
     const val = await this.getSettingValue(CALLS_PROVIDER);
-    return val === 'yandex' ? 'yandex' : 'aitunnel';
+    if (val === 'yandex') return 'yandex';
+    if (val === 'tritech') return 'tritech';
+    return 'aitunnel';
   }
 
   private async getPolzaConfig() {
