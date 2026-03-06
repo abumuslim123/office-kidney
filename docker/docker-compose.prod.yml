@@ -86,7 +86,7 @@ services:
       PGUSER: ${DB_USERNAME}
       PGPASSWORD: ${DB_PASSWORD}
       PGDATABASE: ${DB_DATABASE}
-      DB_BACKUP_CRON: ${DB_BACKUP_CRON:-0 0 * * *}
+      DB_BACKUP_CRON: ${DB_BACKUP_CRON:-1 0 * * *}
       DB_BACKUP_RETENTION_DAYS: ${DB_BACKUP_RETENTION_DAYS:-30}
       DB_BACKUP_DIR: ${DB_BACKUP_DIR:-/backups}
     volumes:
@@ -115,6 +115,7 @@ services:
     volumes:
       - ../backend/apk:/app/apk:ro
       - ../backend/uploads:/app/uploads
+      - ${DB_BACKUP_HOST_DIR:-../backups/postgres}:/backups:ro
     # Чтобы backend резолвил внутренний Bitrix (например bitrix*.kidney.srvu.ru), добавьте dns:
     # с IP вашего DNS, обязательно оставив 127.0.0.11 (DNS Docker для имён postgres и т.д.):
     # dns:
