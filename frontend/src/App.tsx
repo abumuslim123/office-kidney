@@ -11,6 +11,7 @@ import Services from './pages/Services';
 import Bitrix24 from './pages/Bitrix24';
 import Bitrix24Employees from './pages/Bitrix24Employees';
 import HR from './pages/HR';
+import HrHunter from './pages/HrHunter';
 import HrListView from './pages/HrListView';
 import HrEvents from './pages/HrEvents';
 import HrEventsPublic from './pages/HrEventsPublic';
@@ -82,10 +83,12 @@ function App() {
         <Route path="settings" element={<ProtectedRoute permissions={['processes_edit']}><Settings /></ProtectedRoute>} />
         <Route path="calls/topics" element={<ProtectedRoute permissions={['calls_manage_topics']}><CallTopics /></ProtectedRoute>} />
         <Route path="calls/settings" element={<ProtectedRoute permissions={['calls_settings']}><CallsSettings /></ProtectedRoute>} />
-        <Route path="hr" element={<ProtectedRoute permissions={['hr']}><HR /></ProtectedRoute>} />
+        <Route path="hr" element={<Navigate to="/hr/hunter" replace />} />
+        <Route path="hr/hunter" element={<ProtectedRoute permissions={['hr']}><HrHunter /></ProtectedRoute>} />
+        <Route path="hr/lists" element={<ProtectedRoute permissions={['hr']}><HR /></ProtectedRoute>} />
         <Route path="hr/events" element={<ProtectedRoute permissions={['hr']}><HrEvents /></ProtectedRoute>} />
-        <Route path="hr/folder/:folderId" element={<ProtectedRoute permissions={['hr']}><HR /></ProtectedRoute>} />
-        <Route path="hr/:listId" element={<ProtectedRoute permissions={['hr']}><HrListView /></ProtectedRoute>} />
+        <Route path="hr/lists/folder/:folderId" element={<ProtectedRoute permissions={['hr']}><HR /></ProtectedRoute>} />
+        <Route path="hr/lists/:listId" element={<ProtectedRoute permissions={['hr']}><HrListView /></ProtectedRoute>} />
         {resumeEnabled && (
           <Route path="hr/resume" element={<ProtectedRoute permissions={['hr']}><ResumeLayout /></ProtectedRoute>}>
             <Route index element={<ResumeUploadPage />} />

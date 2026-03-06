@@ -12,14 +12,17 @@ import { HrService } from './hr.service';
 import { HrController } from './hr.controller';
 import { HrPublicController } from './hr-public.controller';
 import { HrListsPublicController } from './hr-lists-public.controller';
+import { HhController, HhOAuthCallbackController } from './hh/hh.controller';
+import { HhService } from './hh/hh.service';
+import { AppSetting } from '../settings/entities/app-setting.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([HrFolder, HrList, HrFieldDefinition, HrEntry, HrEvent, HrEventsShare]),
+    TypeOrmModule.forFeature([HrFolder, HrList, HrFieldDefinition, HrEntry, HrEvent, HrEventsShare, AppSetting]),
     MulterModule.register({ storage: multer.memoryStorage() }),
   ],
-  controllers: [HrController, HrPublicController, HrListsPublicController],
-  providers: [HrService],
+  controllers: [HhOAuthCallbackController, HrController, HrPublicController, HrListsPublicController, HhController],
+  providers: [HrService, HhService],
   exports: [HrService],
 })
 export class HrModule {}
