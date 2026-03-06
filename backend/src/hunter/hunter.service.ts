@@ -13,8 +13,6 @@ const HH_TOKEN_EXPIRES_AT = 'hh_token_expires_at';
 const HH_EMPLOYER_ID = 'hh_employer_id';
 const HH_EMPLOYER_NAME = 'hh_employer_name';
 
-const DEFAULT_CLIENT_ID = 'NGDEGHUMNLUL64USKVHKUQDD98H9U599GOE9UQCSNNBP1E6G8QVKJVQIMALE4R3V';
-const DEFAULT_CLIENT_SECRET = 'N4TUT2L38FQJI3QTF9ARM5S0O0D5EQPJSTNNOSFM14B6DKP4IFTSBUCAM1F9D6F2';
 const DEFAULT_REDIRECT_URI = 'https://kidney-office.srvu.ru/';
 
 @Injectable()
@@ -39,11 +37,15 @@ export class HunterService {
   }
 
   private async getClientId(): Promise<string> {
-    return (await this.getSetting(HH_CLIENT_ID)) || DEFAULT_CLIENT_ID;
+    const id = await this.getSetting(HH_CLIENT_ID);
+    if (!id) throw new BadRequestException('hh_client_id не настроен. Укажите в Настройках.');
+    return id;
   }
 
   private async getClientSecret(): Promise<string> {
-    return (await this.getSetting(HH_CLIENT_SECRET)) || DEFAULT_CLIENT_SECRET;
+    const secret = await this.getSetting(HH_CLIENT_SECRET);
+    if (!secret) throw new BadRequestException('hh_client_secret не настроен. Укажите в Настройках.');
+    return secret;
   }
 
   private async getRedirectUri(): Promise<string> {
