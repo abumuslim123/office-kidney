@@ -101,7 +101,7 @@ export default function HR() {
     if (!confirm('Удалить папку и все списки внутри?')) return;
     try {
       await api.delete(`/hr/folders/${id}`);
-      if (folderId === id) navigate('/hr');
+      if (folderId === id) navigate('/hr/lists');
       loadFolders();
     } catch {}
   };
@@ -142,7 +142,7 @@ export default function HR() {
         name: `${list.name} (копия)`,
       });
       if (folderId) loadFolder(folderId);
-      navigate(`/hr/${res.data.id}`);
+      navigate(`/hr/lists/${res.data.id}`);
     } catch {}
   };
 
@@ -195,7 +195,7 @@ export default function HR() {
       setImportForm({ name: '', year: '' });
       if (importFileRef.current) importFileRef.current.value = '';
       loadFolder(folderId);
-      navigate(`/hr/${res.data.id}`);
+      navigate(`/hr/lists/${res.data.id}`);
     } catch (err: unknown) {
       const data = err && typeof err === 'object' && 'response' in err
         ? (err as { response?: { data?: { message?: string | string[] } } }).response?.data
@@ -218,7 +218,7 @@ export default function HR() {
       <div>
         <HrTabs active="lists" />
         <div className="flex items-center gap-4 mb-6">
-          <Link to="/hr" className="text-accent hover:underline text-sm">
+          <Link to="/hr/lists" className="text-accent hover:underline text-sm">
             ← Назад к папкам
           </Link>
           <h2 className="text-xl font-semibold text-gray-900">
@@ -364,7 +364,7 @@ export default function HR() {
                 <div className="divide-y divide-gray-100">
                   {filteredLists.map((l) => (
                     <div key={l.id} className="flex items-center justify-between px-4 py-3 hover:bg-gray-50">
-                      <Link to={`/hr/${l.id}`} className="text-accent hover:underline font-medium">
+                      <Link to={`/hr/lists/${l.id}`} className="text-accent hover:underline font-medium">
                         {l.name}
                         {l.year && <span className="ml-2 text-gray-500 font-normal">({l.year})</span>}
                       </Link>
@@ -446,7 +446,7 @@ export default function HR() {
           <div className="divide-y divide-gray-100">
             {folders.map((f) => (
               <div key={f.id} className="flex items-center justify-between px-4 py-3 hover:bg-gray-50">
-                <Link to={`/hr/folder/${f.id}`} className="text-accent hover:underline font-medium flex items-center gap-2">
+                <Link to={`/hr/lists/folder/${f.id}`} className="text-accent hover:underline font-medium flex items-center gap-2">
                   {f.name}
                   {f.lists !== undefined && (
                     <span className="text-gray-500 font-normal text-sm">({f.lists.length})</span>
