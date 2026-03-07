@@ -103,8 +103,12 @@ export class CallsController {
 
   @Post('topics')
   @Permissions('calls_manage_topics')
-  createTopic(@Body() body: { name: string; keywords?: string[] | string; isActive?: boolean }) {
-    return this.calls.createTopic(body);
+  createTopic(
+    @Req() req: { user: User },
+    @Body() body: { name: string; keywords?: string[] | string; isActive?: boolean },
+  ) {
+    const createdBy = req.user?.displayName || req.user?.login || null;
+    return this.calls.createTopic({ ...body, createdBy });
   }
 
   @Put('topics/:id')
@@ -120,6 +124,85 @@ export class CallsController {
   @Permissions('calls_manage_topics')
   async deleteTopic(@Param('id') id: string) {
     await this.calls.deleteTopic(id);
+    return { success: true };
+  }
+
+  // --- Favorites ---
+
+  @Get('favorites')
+  @Permissions('calls')
+  getFavorites() {
+    return this.calls.listFavorites();
+  }
+
+  @Post('favorites/:callId')
+  @Permissions('calls')
+  async toggleFavorite(@Param('callId') callId: string) {
+    return this.calls.toggleFavorite(callId);
+  }
+
+  // --- Dictionary (corrections) ---
+
+  @Get('dictionary/entries')
+  @Permissions('calls_settings')
+  getDictionaryEntries() {
+    return this.calls.getDictionaryEntries();
+  }
+
+  @Post('dictionary/entries')
+  @Permissions('calls_manage_topics')
+  createDictionaryEntry(@Body() body: { originalWord: string; correctedWord: string; isActive?: boolean }) {
+    if (!body.originalWord?.trim() || !body.correctedWord?.trim()) {
+      throw new BadRequestException('Укажите оригинальное и исправленное слово');
+    }
+    return this.calls.createDictionaryEntry(body);
+  }
+
+  @Put('dictionary/entries/:entryId')
+  @Permissions('calls_manage_topics')
+  updateDictionaryEntry(
+    @Param('entryId') id: string,
+    @Body() body: { originalWord?: string; correctedWord?: string; isActive?: boolean },
+  ) {
+    return this.calls.updateDictionaryEntry(id, body);
+  }
+
+  @Delete('dictionary/entries/:entryId')
+  @Permissions('calls_manage_topics')
+  async deleteDictionaryEntry(@Param('entryId') id: string) {
+    await this.calls.deleteDictionaryEntry(id);
+    return { success: true };
+  }
+
+  // --- Speakers ---
+
+  @Get('speakers')
+  @Permissions('calls_settings')
+  getSpeakers() {
+    return this.calls.refreshSpeakerStatuses();
+  }
+
+  @Post('speakers')
+  @Permissions('calls_settings')
+  @UseInterceptors(
+    FileInterceptor('audio', {
+      storage: multer.memoryStorage(),
+      limits: { fileSize: 50 * 1024 * 1024 },
+    }),
+  )
+  createSpeaker(
+    @UploadedFile() audio: Express.Multer.File,
+    @Body() body: { name: string; description?: string },
+  ) {
+    if (!audio?.buffer) throw new BadRequestException('Загрузите аудио-образец голоса');
+    if (!body.name?.trim()) throw new BadRequestException('Укажите имя диктора');
+    return this.calls.createSpeaker(body, audio);
+  }
+
+  @Delete('speakers/:speakerId')
+  @Permissions('calls_settings')
+  async deleteSpeaker(@Param('speakerId') id: string) {
+    await this.calls.deleteSpeaker(id);
     return { success: true };
   }
 

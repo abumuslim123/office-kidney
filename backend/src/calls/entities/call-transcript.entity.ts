@@ -29,6 +29,13 @@ export class CallTranscript {
   @Column({ type: 'jsonb', nullable: true })
   words: { word: string; start: number; end: number; speaker: 'operator' | 'abonent' }[] | null;
 
+  @Column({ type: 'jsonb', nullable: true })
+  sentiment: {
+    operator: string | null;
+    abonent: string | null;
+    perTurn: { speaker: string; sentiment: string; confidence?: number }[] | null;
+  } | null;
+
   @Column({ type: 'varchar', length: 20, nullable: true })
   language: string | null;
 

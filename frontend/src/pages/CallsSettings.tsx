@@ -12,6 +12,8 @@ type CallsSettings = {
   provider: string;
   speechkitConfigured: boolean;
   speechkitFolderIdMask?: string;
+  tritechConfigured: boolean;
+  tritechUsernameMask?: string;
 };
 
 const DEFAULT_API_BASE = 'https://api.aitunnel.ru/v1';
@@ -33,12 +35,19 @@ export default function CallsSettings() {
   const [clearKey, setClearKey] = useState(false);
 
   // Провайдер
-  const [provider, setProvider] = useState<'aitunnel' | 'yandex'>('aitunnel');
+  const [provider, setProvider] = useState<'aitunnel' | 'yandex' | 'tritech'>('aitunnel');
 
   // Yandex SpeechKit
   const [speechkitApiKey, setSpeechkitApiKey] = useState('');
   const [speechkitFolderId, setSpeechkitFolderId] = useState('');
   const [clearSpeechkitKey, setClearSpeechkitKey] = useState(false);
+
+  // 3iTech
+  const [tritechClientId, setTritechClientId] = useState('');
+  const [tritechClientSecret, setTritechClientSecret] = useState('');
+  const [tritechUsername, setTritechUsername] = useState('');
+  const [tritechPassword, setTritechPassword] = useState('');
+  const [clearTritech, setClearTritech] = useState(false);
 
   const userPermissions = user?.permissions?.map((p) => p.slug) || [];
   const canManageApiKey = userPermissions.includes('calls_api_key');
@@ -53,12 +62,17 @@ export default function CallsSettings() {
       setApiBase(res.data.apiBase || DEFAULT_API_BASE);
       setAudioPath(res.data.audioPath || DEFAULT_AUDIO_PATH);
       setModel(res.data.model || DEFAULT_MODELS[0]);
-      setProvider((res.data.provider as 'aitunnel' | 'yandex') || 'aitunnel');
+      setProvider((res.data.provider as 'aitunnel' | 'yandex' | 'tritech') || 'aitunnel');
       setApiKey('');
       setSpeechkitApiKey('');
       setSpeechkitFolderId('');
+      setTritechClientId('');
+      setTritechClientSecret('');
+      setTritechUsername('');
+      setTritechPassword('');
       setClearKey(false);
       setClearSpeechkitKey(false);
+      setClearTritech(false);
     } catch {
       setError('Не удалось загрузить настройки');
     } finally {
@@ -92,13 +106,32 @@ export default function CallsSettings() {
         }
       }
 
+      if (canManageApiKey) {
+        if (clearTritech) {
+          payload.tritechClientId = '';
+          payload.tritechClientSecret = '';
+          payload.tritechUsername = '';
+          payload.tritechPassword = '';
+        } else {
+          if (tritechClientId.trim()) payload.tritechClientId = tritechClientId.trim();
+          if (tritechClientSecret.trim()) payload.tritechClientSecret = tritechClientSecret.trim();
+          if (tritechUsername.trim()) payload.tritechUsername = tritechUsername.trim();
+          if (tritechPassword.trim()) payload.tritechPassword = tritechPassword.trim();
+        }
+      }
+
       const res = await api.put<CallsSettings>('/calls/settings', payload);
       setSettings(res.data);
       setApiKey('');
       setSpeechkitApiKey('');
       setSpeechkitFolderId('');
+      setTritechClientId('');
+      setTritechClientSecret('');
+      setTritechUsername('');
+      setTritechPassword('');
       setClearKey(false);
       setClearSpeechkitKey(false);
+      setClearTritech(false);
     } catch (err: unknown) {
       const data = err && typeof err === 'object' && 'response' in err
         ? (err as { response?: { data?: { message?: string } } }).response?.data
@@ -111,12 +144,7 @@ export default function CallsSettings() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold text-gray-900">Настройки звонков</h2>
-        <Link to="/calls" className="text-sm text-accent hover:underline">
-          Назад к звонкам
-        </Link>
-      </div>
+      <h3 className="text-lg font-semibold text-gray-900 mb-4">Провайдер транскрипции</h3>
 
       {error && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
@@ -159,6 +187,20 @@ export default function CallsSettings() {
                 <span className="text-sm text-gray-700">
                   Yandex SpeechKit
                   <span className="ml-1 text-xs text-gray-400">(русский язык)</span>
+                </span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="provider"
+                  value="tritech"
+                  checked={provider === 'tritech'}
+                  onChange={() => setProvider('tritech')}
+                  className="accent-indigo-600"
+                />
+                <span className="text-sm text-gray-700">
+                  3iTech
+                  <span className="ml-1 text-xs text-gray-400">(3i-vox.ru · диаризация)</span>
                 </span>
               </label>
             </div>
@@ -297,6 +339,98 @@ export default function CallsSettings() {
               <p className="mt-3 text-xs text-gray-400">
                 Аудио → ffmpeg (нарезка по 24 сек, 16 кГц моно) → SpeechKit REST v1 → сборка текста → LLM-коррекция терминов
               </p>
+            </div>
+          )}
+
+          {/* 3iTech */}
+          {provider === 'tritech' && (
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <p className="text-sm font-medium text-gray-700 mb-1">3iTech (3i-vox.ru)</p>
+              <p className="text-xs text-gray-500 mb-3">
+                {settings?.tritechConfigured
+                  ? `Настроен (${settings.tritechUsernameMask || '***'})`
+                  : 'Не настроен — укажите Client ID, Client Secret, логин и пароль'}
+              </p>
+
+              <div className="bg-blue-50 border border-blue-200 rounded p-3 mb-3 text-xs text-blue-700">
+                Распознавание речи с автоматическим определением спикеров (оператор / абонент).
+                Поддерживает стерео и моно записи, пунктуацию, диаризацию.
+              </div>
+
+              {canManageApiKey ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <label className="text-xs text-gray-600">
+                    Client ID
+                    <input
+                      type="text"
+                      value={tritechClientId}
+                      onChange={(e) => setTritechClientId(e.target.value)}
+                      className="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                      placeholder="Вставьте Client ID"
+                    />
+                  </label>
+                  <label className="text-xs text-gray-600">
+                    Client Secret
+                    <input
+                      type="password"
+                      value={tritechClientSecret}
+                      onChange={(e) => setTritechClientSecret(e.target.value)}
+                      className="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                      placeholder="Вставьте Client Secret"
+                    />
+                  </label>
+                  <label className="text-xs text-gray-600">
+                    Логин (username)
+                    <input
+                      type="text"
+                      value={tritechUsername}
+                      onChange={(e) => setTritechUsername(e.target.value)}
+                      className="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                      placeholder="Логин 3i-vox.ru"
+                    />
+                  </label>
+                  <label className="text-xs text-gray-600">
+                    Пароль (password)
+                    <input
+                      type="password"
+                      value={tritechPassword}
+                      onChange={(e) => setTritechPassword(e.target.value)}
+                      className="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                      placeholder="Пароль 3i-vox.ru"
+                    />
+                  </label>
+                </div>
+              ) : (
+                <div className="text-xs text-gray-500 border border-gray-200 rounded px-3 py-2 bg-gray-50">
+                  Для управления ключами нужен доступ `calls_api_key`.
+                </div>
+              )}
+
+              {canManageApiKey && (
+                <div className="mt-3 flex items-center gap-2 text-xs text-gray-600">
+                  <input
+                    id="clear-tritech-key"
+                    type="checkbox"
+                    checked={clearTritech}
+                    onChange={(e) => setClearTritech(e.target.checked)}
+                  />
+                  <label htmlFor="clear-tritech-key">Очистить ключи 3iTech при сохранении</label>
+                </div>
+              )}
+
+              <p className="mt-3 text-xs text-gray-400">
+                Аудио → загрузка в 3i-vox.ru → распознавание с диаризацией → результат с разделением на оператора и абонента.
+                Анализ эмоций включён автоматически.
+              </p>
+
+              <div className="mt-3">
+                <Link
+                  to="/calls/speakers"
+                  className="text-sm text-accent hover:underline"
+                >
+                  Управление моделями дикторов →
+                </Link>
+              </div>
             </div>
           )}
 

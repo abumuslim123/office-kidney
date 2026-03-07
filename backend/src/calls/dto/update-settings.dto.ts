@@ -28,4 +28,20 @@ export class UpdateCallsSettingsDto {
   @IsOptional()
   @IsString()
   speechkitFolderId?: string;
+
+  @IsOptional()
+  @IsString()
+  tritechClientId?: string;
+
+  @IsOptional()
+  @IsString()
+  tritechClientSecret?: string;
+
+  @IsOptional()
+  @IsString()
+  tritechUsername?: string;
+
+  @IsOptional()
+  @IsString()
+  tritechPassword?: string;
 }

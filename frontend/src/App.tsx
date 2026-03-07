@@ -11,6 +11,7 @@ import Services from './pages/Services';
 import Bitrix24 from './pages/Bitrix24';
 import Bitrix24Employees from './pages/Bitrix24Employees';
 import HR from './pages/HR';
+import HrHunter from './pages/HrHunter';
 import HrListView from './pages/HrListView';
 import HrEvents from './pages/HrEvents';
 import HrEventsPublic from './pages/HrEventsPublic';
@@ -20,7 +21,13 @@ import ScreensSettings from './pages/ScreensSettings';
 import Calls from './pages/Calls';
 import CallDetail from './pages/CallDetail';
 import CallTopics from './pages/CallTopics';
+import CallDictionary from './pages/CallDictionary';
+import CallSpeakers from './pages/CallSpeakers';
 import CallsSettings from './pages/CallsSettings';
+import CallsSettingsLayout from './pages/CallsSettingsLayout';
+import CallsFavorites from './pages/CallsFavorites';
+import CallsRecording from './pages/CallsRecording';
+import CallsReports from './pages/CallsReports';
 import Processes from './pages/Processes';
 import Settings from './pages/Settings';
 import ResumeLayout from './components/resume/ResumeLayout';
@@ -80,12 +87,22 @@ function App() {
         <Route path="calls/:id" element={<ProtectedRoute permissions={['calls']}><CallDetail /></ProtectedRoute>} />
         <Route path="processes" element={<ProtectedRoute permissions={['processes_view']}><Processes /></ProtectedRoute>} />
         <Route path="settings" element={<ProtectedRoute permissions={['processes_edit']}><Settings /></ProtectedRoute>} />
-        <Route path="calls/topics" element={<ProtectedRoute permissions={['calls_manage_topics']}><CallTopics /></ProtectedRoute>} />
-        <Route path="calls/settings" element={<ProtectedRoute permissions={['calls_settings']}><CallsSettings /></ProtectedRoute>} />
-        <Route path="hr" element={<ProtectedRoute permissions={['hr']}><HR /></ProtectedRoute>} />
+        <Route path="calls/speakers" element={<ProtectedRoute permissions={['calls_settings']}><CallSpeakers /></ProtectedRoute>} />
+        <Route path="calls/settings" element={<ProtectedRoute permissions={['calls_settings']}><CallsSettingsLayout /></ProtectedRoute>}>
+          <Route index element={<Navigate to="provider" replace />} />
+          <Route path="provider" element={<CallsSettings />} />
+          <Route path="dictionary" element={<CallDictionary />} />
+          <Route path="topics" element={<CallTopics />} />
+          <Route path="favorites" element={<CallsFavorites />} />
+          <Route path="recording" element={<CallsRecording />} />
+          <Route path="reports" element={<CallsReports />} />
+        </Route>
+        <Route path="hr" element={<Navigate to="/hr/hunter" replace />} />
+        <Route path="hr/hunter" element={<ProtectedRoute permissions={['hr']}><HrHunter /></ProtectedRoute>} />
+        <Route path="hr/lists" element={<ProtectedRoute permissions={['hr']}><HR /></ProtectedRoute>} />
         <Route path="hr/events" element={<ProtectedRoute permissions={['hr']}><HrEvents /></ProtectedRoute>} />
-        <Route path="hr/folder/:folderId" element={<ProtectedRoute permissions={['hr']}><HR /></ProtectedRoute>} />
-        <Route path="hr/:listId" element={<ProtectedRoute permissions={['hr']}><HrListView /></ProtectedRoute>} />
+        <Route path="hr/lists/folder/:folderId" element={<ProtectedRoute permissions={['hr']}><HR /></ProtectedRoute>} />
+        <Route path="hr/lists/:listId" element={<ProtectedRoute permissions={['hr']}><HrListView /></ProtectedRoute>} />
         {resumeEnabled && (
           <Route path="hr/resume" element={<ProtectedRoute permissions={['hr']}><ResumeLayout /></ProtectedRoute>}>
             <Route index element={<ResumeUploadPage />} />

@@ -6,22 +6,19 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
-@Entity('call_topics')
-export class CallTopic {
+@Entity('call_dictionary_entries')
+export class CallDictionaryEntry {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
   @Column({ type: 'varchar', length: 200 })
-  name: string;
+  originalWord: string;
 
-  @Column({ type: 'jsonb', default: () => "'[]'" })
-  keywords: string[];
+  @Column({ type: 'varchar', length: 200 })
+  correctedWord: string;
 
   @Column({ type: 'boolean', default: true })
   isActive: boolean;
-
-  @Column({ type: 'varchar', length: 200, nullable: true })
-  createdBy: string | null;
 
   @CreateDateColumn()
   createdAt: Date;
