@@ -38,6 +38,9 @@ export class Call {
   @Column({ type: 'varchar', length: 30, default: 'uploaded' })
   status: string;
 
+  @Column({ type: 'boolean', default: false })
+  isFavorite: boolean;
+
   @CreateDateColumn()
   createdAt: Date;
 

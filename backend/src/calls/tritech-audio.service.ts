@@ -36,6 +36,7 @@ export type TritechTranscribeResult = {
   operatorText: string | null;
   abonentText: string | null;
   turns: { speaker: 'operator' | 'abonent'; text: string; start?: number; end?: number }[] | null;
+  words: { word: string; start: number; end: number; speaker: 'operator' | 'abonent' }[] | null;
   duration: number;
   speechDuration: number;
   silenceDuration: number;
@@ -294,6 +295,7 @@ export class TritechAudioService {
         operatorText: null,
         abonentText: null,
         turns: null,
+        words: null,
         duration,
         speechDuration,
         silenceDuration,
@@ -304,24 +306,20 @@ export class TritechAudioService {
     // Determine which channel is operator
     const uniqueChannels = [...new Set(phrases.map((p) => p.channel))];
 
-    let turns: { speaker: 'operator' | 'abonent'; text: string; start?: number; end?: number }[];
-
+    // Find operator channel
+    let operatorChannel = phrases[0]?.channel || '0';
     if (uniqueChannels.length >= 2) {
-      // Multi-channel: find operator by greeting heuristic
-      const channelTexts = new Map<string, string>();
-      for (const p of phrases) {
-        channelTexts.set(p.channel, (channelTexts.get(p.channel) || '') + ' ' + p.text);
-      }
-
-      // Check first few phrases for greeting to identify operator
-      let operatorChannel = phrases[0]?.channel || '0';
       for (const p of phrases.slice(0, 5)) {
         if (greetingPattern.test(p.text)) {
           operatorChannel = p.channel;
           break;
         }
       }
+    }
 
+    let turns: { speaker: 'operator' | 'abonent'; text: string; start?: number; end?: number }[];
+
+    if (uniqueChannels.length >= 2) {
       turns = phrases.map((p) => ({
         speaker: p.channel === operatorChannel ? 'operator' as const : 'abonent' as const,
         text: p.text,
@@ -336,6 +334,24 @@ export class TritechAudioService {
         start: p.start,
         end: p.end,
       }));
+    }
+
+    // Extract word-level timestamps
+    let words: { word: string; start: number; end: number; speaker: 'operator' | 'abonent' }[] | null = null;
+    if (Array.isArray(result) && result.length > 0 && result[0]?.word !== undefined) {
+      words = [];
+      for (const w of result) {
+        if (!w || typeof w !== 'object' || !w.word) continue;
+        const ch = String(w.channel ?? w.speaker_id ?? '0');
+        const speaker = ch === operatorChannel ? 'operator' as const : 'abonent' as const;
+        words.push({
+          word: String(w.word),
+          start: (Number(w.begin) || 0) / 1000,
+          end: (Number(w.end) || 0) / 1000,
+          speaker,
+        });
+      }
+      if (!words.length) words = null;
     }
 
     // Merge consecutive turns from the same speaker
@@ -422,6 +438,7 @@ export class TritechAudioService {
       operatorText,
       abonentText,
       turns: merged.length > 0 ? merged : null,
+      words,
       duration,
       speechDuration,
       silenceDuration,

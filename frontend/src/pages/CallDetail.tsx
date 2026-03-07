@@ -60,6 +60,20 @@ function sentimentLabel(sentiment: string): string {
   return s ? `${s.emoji} ${s.label}` : sentiment;
 }
 
+async function downloadAudioWithAuth(url: string, filename: string) {
+  const token = localStorage.getItem('kidney_access');
+  const res = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) return;
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 function formatDuration(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
@@ -107,30 +121,46 @@ export default function CallDetail() {
     setActiveTopicId((prev) => (prev === topicId ? null : topicId));
   }, []);
 
-  // Compute keyword positions for waveform markers (must be before early returns)
-  const keywordMarkers = useMemo(() => {
+  // Compute all keyword timestamps (for both waveform markers and topics panel)
+  // Only match keywords in operator speech. Supports multi-word keywords.
+  const keywordTimestamps = useMemo(() => {
     const words = call?.transcript?.words;
     const matches = call?.matches;
     if (!words?.length || !matches?.length) return [];
-    const keywords = matches.map((m) => m.keyword);
-    const activeKwSet = new Set(activeTopicKeywords.map((k) => k.toLowerCase()));
-    const result: { time: number; label: string; color: string }[] = [];
-    for (const w of words) {
-      const cleaned = w.word.toLowerCase().replace(/[.,!?;:"""''()]/g, '');
-      for (const kw of keywords) {
-        if (cleaned.includes(kw.toLowerCase())) {
-          const isActive = activeKwSet.has(kw.toLowerCase());
-          result.push({
-            time: w.start,
-            label: kw,
-            color: isActive ? 'rgba(34, 197, 94, 0.6)' : 'rgba(234, 179, 8, 0.5)',
-          });
-          break;
+    const opWords = words.filter((w) => w.speaker === 'operator');
+    const keywords = [...new Set(matches.map((m) => m.keyword))];
+    const result: { keyword: string; time: number }[] = [];
+    const clean = (s: string) => s.toLowerCase().replace(/[.,!?;:"""''()]/g, '');
+    for (const kw of keywords) {
+      const kwParts = kw.toLowerCase().split(/\s+/).filter(Boolean);
+      for (let i = 0; i <= opWords.length - kwParts.length; i++) {
+        let matched = true;
+        for (let j = 0; j < kwParts.length; j++) {
+          if (!clean(opWords[i + j].word).includes(kwParts[j])) {
+            matched = false;
+            break;
+          }
+        }
+        if (matched) {
+          result.push({ keyword: kw, time: opWords[i].start });
         }
       }
     }
     return result;
-  }, [call, activeTopicKeywords]);
+  }, [call]);
+
+  // Compute keyword positions for waveform markers (must be before early returns)
+  const keywordMarkers = useMemo(() => {
+    if (!keywordTimestamps.length) return [];
+    const activeKwSet = new Set(activeTopicKeywords.map((k) => k.toLowerCase()));
+    return keywordTimestamps.map((kt) => ({
+      time: kt.time,
+      label: kt.keyword,
+      color: activeKwSet.has(kt.keyword.toLowerCase())
+        ? 'rgba(34, 197, 94, 0.6)'
+        : 'rgba(234, 179, 8, 0.5)',
+    }));
+  }, [keywordTimestamps, activeTopicKeywords]);
 
   if (loading) {
     return (
@@ -170,7 +200,7 @@ export default function CallDetail() {
 
   // Use negative margin to escape Layout's p-6 and take full width/height
   return (
-    <div className="-m-6 flex flex-col" style={{ height: 'calc(100vh - 49px)' }}>
+    <div className="-m-6 flex flex-col" style={{ minHeight: 'calc(100vh - 49px)' }}>
       {/* Header */}
       <div className="flex-shrink-0 px-6 py-3 border-b border-gray-200 bg-white">
         <div className="flex items-center justify-between">
@@ -227,23 +257,22 @@ export default function CallDetail() {
             </div>
           </div>
           {hasAudio && (
-            <a
-              href={audioUrl}
-              download
+            <button
+              type="button"
+              onClick={() => downloadAudioWithAuth(audioUrl, `call-${call.id}.wav`)}
               className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
             >
               Скачать аудио
-            </a>
+            </button>
           )}
         </div>
       </div>
 
       {/* Main content */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div className="flex-1">
         {call.transcript ? (
-          <div className="h-full grid grid-cols-1 lg:grid-cols-[1fr_260px]">
-            <div className="overflow-y-auto px-6 py-4">
-              <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Диалог</div>
+          <div className="h-full grid grid-cols-1 lg:grid-cols-[1fr_300px]">
+            <div className="overflow-y-auto" style={{ padding: 10 }}>
               {displayTurns.length > 0 ? (
                 <TranscriptChat
                   turns={displayTurns}
@@ -252,13 +281,21 @@ export default function CallDetail() {
                   keywords={keywords}
                   highlightedKeywords={activeTopicKeywords}
                   onSeek={handleSeek}
+                  operatorName={call.employeeName || 'Оператор'}
+                  abonentName={call.clientName || call.clientPhone || 'Собеседник'}
                 />
               ) : (
                 <div className="text-sm text-gray-600 whitespace-pre-wrap">{call.transcript.text}</div>
               )}
             </div>
             <div className="border-l border-gray-200 px-5 py-4 overflow-y-auto bg-gray-50/50">
-              <TopicsPanel matches={call.matches} activeTopicId={activeTopicId} onTopicClick={handleTopicClick} />
+              <TopicsPanel
+                matches={call.matches}
+                activeTopicId={activeTopicId}
+                onTopicClick={handleTopicClick}
+                keywordTimestamps={keywordTimestamps}
+                onSeek={handleSeek}
+              />
             </div>
           </div>
         ) : (
