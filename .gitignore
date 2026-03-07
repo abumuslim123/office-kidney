@@ -38,3 +38,6 @@ tv-app/.gradle/
 
 # Uploaded files
 backend/uploads/
+
+# Scraped docs
+scraped_3ivox/

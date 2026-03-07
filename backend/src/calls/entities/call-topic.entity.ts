@@ -20,6 +20,9 @@ export class CallTopic {
   @Column({ type: 'boolean', default: true })
   isActive: boolean;
 
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  createdBy: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

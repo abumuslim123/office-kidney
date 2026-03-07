@@ -45,6 +45,7 @@ type CallRow = {
   silenceDurationSeconds: number;
   audioPath: string;
   status: string;
+  isFavorite: boolean;
   transcript: CallTranscript | null;
   matches: CallMatch[];
 };
@@ -157,12 +158,18 @@ function IconSettings({ className = 'w-4 h-4' }: { className?: string }) {
   );
 }
 
-function IconTag({ className = 'w-4 h-4' }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z" />
-    </svg>
-  );
+async function downloadAudioWithAuth(url: string, filename: string) {
+  const token = localStorage.getItem('kidney_access');
+  const res = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) return;
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 /* ── Helpers ── */
@@ -247,6 +254,8 @@ export default function Calls() {
 
   const [showFilters, setShowFilters] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
+  const [showSettingsHover, setShowSettingsHover] = useState(false);
+  const settingsHoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [filterFrom, setFilterFrom] = useState('');
   const [filterTo, setFilterTo] = useState('');
@@ -407,6 +416,13 @@ export default function Calls() {
     }
   };
 
+  const handleToggleFavorite = async (callId: string) => {
+    try {
+      const res = await api.post<{ id: string; isFavorite: boolean }>(`/calls/favorites/${callId}`);
+      setCalls((prev) => prev.map((c) => c.id === callId ? { ...c, isFavorite: res.data.isFavorite } : c));
+    } catch { /* ignore */ }
+  };
+
   const handlePlayAudio = async (callId: string, audioUrl: string) => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -439,7 +455,7 @@ export default function Calls() {
     <div>
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
-        <h2 className="text-xl font-semibold text-gray-900">Звонки</h2>
+        <h2 className="text-xl font-semibold text-gray-900">KCalls</h2>
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -469,27 +485,46 @@ export default function Calls() {
             )}
           </button>
           {canViewSettings && (
-            <Link
-              to="/calls/settings"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+            <div
+              className="relative"
+              onMouseEnter={() => {
+                if (settingsHoverTimer.current) clearTimeout(settingsHoverTimer.current);
+                setShowSettingsHover(true);
+              }}
+              onMouseLeave={() => {
+                settingsHoverTimer.current = setTimeout(() => setShowSettingsHover(false), 200);
+              }}
             >
-              <IconSettings />
-              Настройки
-            </Link>
+              <button
+                type="button"
+                onClick={() => navigate('/calls/settings')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
+              >
+                <IconSettings />
+                Настройки
+              </button>
+              {showSettingsHover && (
+                <div className="absolute right-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50">
+                  {[
+                    { to: '/calls/settings/provider', label: 'Провайдер' },
+                    { to: '/calls/settings/dictionary', label: 'Словарь' },
+                    { to: '/calls/settings/topics', label: 'Тематики' },
+                    { to: '/calls/settings/favorites', label: 'Избранное' },
+                    { to: '/calls/settings/recording', label: 'Режим записи' },
+                    { to: '/calls/settings/reports', label: 'Отчеты' },
+                  ].map((item) => (
+                    <Link
+                      key={item.to}
+                      to={item.to}
+                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      {item.label}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
-          <Link
-            to="/calls/topics"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors"
-          >
-            <IconTag />
-            Тематики
-          </Link>
-          <Link
-            to="/calls/dictionary"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
-          >
-            Словарь
-          </Link>
         </div>
       </div>
 
@@ -777,6 +812,16 @@ export default function Calls() {
                         <div className="inline-flex items-center gap-1">
                           <button
                             type="button"
+                            onClick={() => handleToggleFavorite(call.id)}
+                            className={`p-1.5 rounded-lg transition-colors ${call.isFavorite ? 'text-yellow-500' : 'text-gray-300 hover:text-yellow-400'}`}
+                            title={call.isFavorite ? 'Убрать из избранного' : 'В избранное'}
+                          >
+                            <svg className="w-4 h-4" fill={call.isFavorite ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => handleTranscribe(call.id)}
                             disabled={isTranscribing}
                             className="p-1.5 rounded-lg text-gray-400 hover:text-accent hover:bg-accent/10 disabled:opacity-40 transition-colors"
@@ -802,14 +847,14 @@ export default function Calls() {
                               >
                                 {isPlaying ? <IconPause /> : <IconPlay />}
                               </button>
-                              <a
-                                href={audioUrl}
-                                download
+                              <button
+                                type="button"
+                                onClick={() => downloadAudioWithAuth(audioUrl, `call-${call.id}.wav`)}
                                 className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                                 title="Скачать аудио"
                               >
                                 <IconDownload />
-                              </a>
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => handleDeleteAudio(call.id)}

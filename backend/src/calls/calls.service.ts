@@ -573,7 +573,7 @@ export class CallsService {
     return this.getSettings();
   }
 
-  async createTopic(data: { name: string; keywords?: string[] | string; isActive?: boolean }) {
+  async createTopic(data: { name: string; keywords?: string[] | string; isActive?: boolean; createdBy?: string | null }) {
     const name = data.name?.trim();
     if (!name) throw new BadRequestException('Название тематики обязательно');
     const keywords = this.normalizeKeywords(data.keywords);
@@ -581,6 +581,7 @@ export class CallsService {
       name,
       keywords,
       isActive: data.isActive ?? true,
+      createdBy: data.createdBy || null,
     });
     return this.topicRepo.save(topic);
   }
@@ -624,7 +625,7 @@ export class CallsService {
           operatorText: corrected.operatorText,
           abonentText: corrected.abonentText,
           turns: corrected.turns,
-          words: null,
+          words: result.words || null,
           language: 'ru',
           provider: 'tritech',
           sentiment: result.sentiment,
@@ -634,7 +635,7 @@ export class CallsService {
         transcript.operatorText = corrected.operatorText;
         transcript.abonentText = corrected.abonentText;
         transcript.turns = corrected.turns;
-        transcript.words = null;
+        transcript.words = result.words || null;
         transcript.language = 'ru';
         transcript.provider = 'tritech';
         transcript.sentiment = result.sentiment;
@@ -1057,6 +1058,32 @@ export class CallsService {
       abonentText: correctedAbonent,
       turns: correctedTurns,
     };
+  }
+
+  // --- Favorites ---
+
+  async listFavorites() {
+    const calls = await this.callRepo.find({
+      where: { isFavorite: true },
+      order: { callAt: 'DESC' },
+    });
+    if (!calls.length) return [];
+    const callIds = calls.map((c) => c.id);
+    const transcripts = await this.transcriptRepo.find({ where: { callId: In(callIds) } });
+    const transcriptMap = new Map(transcripts.map((t) => [t.callId, t]));
+    return calls.map((call) => ({
+      ...call,
+      transcript: transcriptMap.get(call.id) || null,
+      matches: [],
+    }));
+  }
+
+  async toggleFavorite(callId: string) {
+    const call = await this.callRepo.findOne({ where: { id: callId } });
+    if (!call) throw new NotFoundException('Звонок не найден');
+    call.isFavorite = !call.isFavorite;
+    await this.callRepo.save(call);
+    return { id: call.id, isFavorite: call.isFavorite };
   }
 
   async getDictionaryEntries() {

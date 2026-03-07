@@ -103,8 +103,12 @@ export class CallsController {
 
   @Post('topics')
   @Permissions('calls_manage_topics')
-  createTopic(@Body() body: { name: string; keywords?: string[] | string; isActive?: boolean }) {
-    return this.calls.createTopic(body);
+  createTopic(
+    @Req() req: { user: User },
+    @Body() body: { name: string; keywords?: string[] | string; isActive?: boolean },
+  ) {
+    const createdBy = req.user?.displayName || req.user?.login || null;
+    return this.calls.createTopic({ ...body, createdBy });
   }
 
   @Put('topics/:id')
@@ -121,6 +125,20 @@ export class CallsController {
   async deleteTopic(@Param('id') id: string) {
     await this.calls.deleteTopic(id);
     return { success: true };
+  }
+
+  // --- Favorites ---
+
+  @Get('favorites')
+  @Permissions('calls')
+  getFavorites() {
+    return this.calls.listFavorites();
+  }
+
+  @Post('favorites/:callId')
+  @Permissions('calls')
+  async toggleFavorite(@Param('callId') callId: string) {
+    return this.calls.toggleFavorite(callId);
   }
 
   // --- Dictionary (corrections) ---

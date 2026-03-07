@@ -21,26 +21,52 @@ type TranscriptChatProps = {
   keywords: string[];
   highlightedKeywords?: string[];
   onSeek: (time: number) => void;
+  operatorName?: string;
+  abonentName?: string;
 };
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function isKeywordMatch(word: string, keywords: string[]): boolean {
-  if (!keywords.length) return false;
-  const lower = word.toLowerCase().replace(/[.,!?;:"""''()]/g, '');
-  return keywords.some((kw) => lower.includes(kw.toLowerCase()));
+const clean = (s: string) => s.toLowerCase().replace(/[.,!?;:"""''()]/g, '');
+
+/** Build a set of word indices that match keywords (supports multi-word phrases) */
+function buildKeywordHighlightMap(
+  words: { word: string }[],
+  keywords: string[],
+  highlightedKeywords: string[],
+): Map<number, 'green' | 'yellow'> {
+  const result = new Map<number, 'green' | 'yellow'>();
+  const allKws = [...new Set([...highlightedKeywords, ...keywords])];
+  const highlightedSet = new Set(highlightedKeywords.map((k) => k.toLowerCase()));
+
+  for (const kw of allKws) {
+    const parts = kw.toLowerCase().split(/\s+/).filter(Boolean);
+    for (let i = 0; i <= words.length - parts.length; i++) {
+      let matched = true;
+      for (let j = 0; j < parts.length; j++) {
+        if (!clean(words[i + j].word).includes(parts[j])) {
+          matched = false;
+          break;
+        }
+      }
+      if (matched) {
+        const color = highlightedSet.has(kw.toLowerCase()) ? 'green' : 'yellow';
+        for (let j = 0; j < parts.length; j++) {
+          if (!result.has(i + j) || color === 'green') {
+            result.set(i + j, color);
+          }
+        }
+      }
+    }
+  }
+  return result;
 }
 
-function getKeywordHighlightClass(word: string, keywords: string[], highlightedKeywords: string[]): string {
-  const lower = word.toLowerCase().replace(/[.,!?;:"""''()]/g, '');
-  if (highlightedKeywords.length && highlightedKeywords.some((kw) => lower.includes(kw.toLowerCase()))) {
-    return 'bg-green-300 bg-opacity-70';
-  }
-  if (keywords.length && keywords.some((kw) => lower.includes(kw.toLowerCase()))) {
-    return 'bg-yellow-200 bg-opacity-70';
-  }
+function getHighlightClass(color: 'green' | 'yellow' | undefined): string {
+  if (color === 'green') return 'bg-green-200 rounded-sm px-0.5';
+  if (color === 'yellow') return 'bg-yellow-100 rounded-sm px-0.5';
   return '';
 }
 
@@ -55,7 +81,10 @@ function mapWordsToTurns(turns: Turn[], words: TimedWord[]): (TimedWord[] | null
   });
 }
 
-export default function TranscriptChat({ turns, words, currentTime, keywords, highlightedKeywords = [], onSeek }: TranscriptChatProps) {
+export default function TranscriptChat({
+  turns, words, currentTime, keywords, highlightedKeywords = [], onSeek,
+  operatorName = 'Оператор', abonentName = 'Собеседник',
+}: TranscriptChatProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const activeHighlightRef = useRef<HTMLSpanElement | null>(null);
   const activeTurnIdxRef = useRef<number>(-1);
@@ -97,7 +126,7 @@ export default function TranscriptChat({ turns, words, currentTime, keywords, hi
 
     // Remove previous highlight
     if (activeHighlightRef.current) {
-      activeHighlightRef.current.classList.remove('bg-indigo-200');
+      activeHighlightRef.current.classList.remove('bg-indigo-200', 'rounded-sm');
       activeHighlightRef.current = null;
     }
 
@@ -105,7 +134,7 @@ export default function TranscriptChat({ turns, words, currentTime, keywords, hi
 
     const el = containerRef.current.querySelector(`[data-widx="${activeWordIdx}"]`) as HTMLSpanElement | null;
     if (el) {
-      el.classList.add('bg-indigo-200');
+      el.classList.add('bg-indigo-200', 'rounded-sm');
       activeHighlightRef.current = el;
     }
   }, [activeWordIdx]);
@@ -125,54 +154,52 @@ export default function TranscriptChat({ turns, words, currentTime, keywords, hi
     speaker === 'operator' || speaker === 'speaker-a';
 
   const speakerLabel = (speaker: string) => {
-    if (speaker === 'operator') return 'Оператор';
-    if (speaker === 'speaker-a') return 'Спикер A';
+    if (isOperator(speaker)) return operatorName;
     if (speaker === 'speaker-b') return 'Спикер B';
-    return 'Собеседник';
+    return abonentName;
   };
 
   return (
-    <div ref={containerRef} className="flex flex-col gap-2 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
-      {turns.map((turn, idx) => {
-        const op = isOperator(turn.speaker);
-        const wordsForTurn = turnWords?.[idx];
-        const isActive = idx === activeTurnIdx;
+    <div ref={containerRef} className="overflow-y-auto" style={{ maxHeight: 'calc(100vh - 220px)', padding: 10 }}>
+      <div className="text-base font-semibold text-gray-900 mb-4">Расшифровка</div>
+      <div className="space-y-3">
+        {turns.map((turn, idx) => {
+          const wordsForTurn = turnWords?.[idx];
+          const isActive = idx === activeTurnIdx;
+          const highlightMap = wordsForTurn && isOperator(turn.speaker)
+            ? buildKeywordHighlightMap(wordsForTurn, keywords, highlightedKeywords)
+            : null;
 
-        return (
-          <div
-            key={idx}
-            data-tidx={idx}
-            className={`flex ${op ? 'justify-start' : 'justify-end'}`}
-          >
+          return (
             <div
-              className={`max-w-[85%] rounded-lg px-3 py-2 transition-shadow ${
-                op ? 'bg-gray-200 text-gray-900' : 'bg-accent text-white'
-              } ${isActive ? 'ring-2 ring-indigo-400' : ''} ${
-                turn.start != null ? 'cursor-pointer' : ''
-              }`}
-              onClick={() => {
-                if (turn.start != null) onSeek(turn.start);
-              }}
+              key={idx}
+              data-tidx={idx}
+              className={`flex gap-4 py-1.5 transition-colors ${isActive ? 'bg-indigo-50/60 -mx-2 px-2 rounded-lg' : ''} ${turn.start != null ? 'cursor-pointer' : ''}`}
+              onClick={() => { if (turn.start != null) onSeek(turn.start); }}
             >
-              <div className="text-xs font-semibold opacity-80 mb-0.5">
-                {speakerLabel(turn.speaker)}
+              {/* Speaker name column */}
+              <div className="flex-shrink-0 w-40 text-right">
+                <span className={`text-sm font-semibold ${isOperator(turn.speaker) ? 'text-gray-900' : 'text-gray-500'}`}>
+                  {speakerLabel(turn.speaker)}:
+                </span>
                 {turn.start != null && (
-                  <span className="ml-2 opacity-60">
+                  <div className="text-xs text-gray-400 mt-0.5">
                     {Math.floor(turn.start / 60)}:{Math.floor(turn.start % 60).toString().padStart(2, '0')}
-                  </span>
+                  </div>
                 )}
               </div>
-              <div className="text-sm whitespace-pre-wrap leading-relaxed">
+
+              {/* Text column */}
+              <div className="flex-1 text-sm text-gray-800 leading-relaxed">
                 {wordsForTurn ? (
                   wordsForTurn.map((w, wIdx) => {
-                    // Find global word index for data-widx
                     const globalIdx = words!.indexOf(w);
-                    const kwClass = getKeywordHighlightClass(w.word, keywords, highlightedKeywords);
+                    const kwClass = getHighlightClass(highlightMap?.get(wIdx));
                     return (
                       <span
                         key={wIdx}
                         data-widx={globalIdx}
-                        className={`cursor-pointer rounded-sm transition-colors ${kwClass}`}
+                        className={`cursor-pointer transition-colors ${kwClass}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           onSeek(w.start);
@@ -187,22 +214,22 @@ export default function TranscriptChat({ turns, words, currentTime, keywords, hi
                     dangerouslySetInnerHTML={{
                       __html: (() => {
                         let html = turn.text;
-                        // First pass: green highlights for active topic keywords
-                        if (highlightedKeywords.length) {
-                          html = html.replace(
-                            new RegExp(`(${highlightedKeywords.map(escapeRegExp).join('|')})`, 'gi'),
-                            '<mark class="bg-green-300 rounded-sm">$1</mark>',
+                        if (isOperator(turn.speaker)) {
+                          if (highlightedKeywords.length) {
+                            html = html.replace(
+                              new RegExp(`(${highlightedKeywords.map(escapeRegExp).join('|')})`, 'gi'),
+                              '<mark class="bg-green-200 rounded-sm px-0.5">$1</mark>',
+                            );
+                          }
+                          const remaining = keywords.filter(
+                            (kw) => !highlightedKeywords.some((hk) => hk.toLowerCase() === kw.toLowerCase()),
                           );
-                        }
-                        // Second pass: yellow highlights for remaining keywords (skip already marked)
-                        const remaining = keywords.filter(
-                          (kw) => !highlightedKeywords.some((hk) => hk.toLowerCase() === kw.toLowerCase()),
-                        );
-                        if (remaining.length) {
-                          html = html.replace(
-                            new RegExp(`(?!<[^>]*)(${remaining.map(escapeRegExp).join('|')})(?![^<]*>)`, 'gi'),
-                            '<mark class="bg-yellow-200 rounded-sm">$1</mark>',
-                          );
+                          if (remaining.length) {
+                            html = html.replace(
+                              new RegExp(`(?!<[^>]*)(${remaining.map(escapeRegExp).join('|')})(?![^<]*>)`, 'gi'),
+                              '<mark class="bg-yellow-100 rounded-sm px-0.5">$1</mark>',
+                            );
+                          }
                         }
                         return html;
                       })(),
@@ -211,9 +238,9 @@ export default function TranscriptChat({ turns, words, currentTime, keywords, hi
                 )}
               </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }

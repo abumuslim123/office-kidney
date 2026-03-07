@@ -144,12 +144,7 @@ export default function CallsSettings() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold text-gray-900">Настройки звонков</h2>
-        <Link to="/calls" className="text-sm text-accent hover:underline">
-          Назад к звонкам
-        </Link>
-      </div>
+      <h3 className="text-lg font-semibold text-gray-900 mb-4">Провайдер транскрипции</h3>
 
       {error && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
