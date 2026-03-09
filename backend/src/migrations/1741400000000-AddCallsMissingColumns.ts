@@ -14,6 +14,16 @@ export class AddCallsMissingColumns1741400000000 implements MigrationInterface {
       `ALTER TABLE "call_transcripts" ADD COLUMN IF NOT EXISTS "dictionaryApplied" jsonb DEFAULT NULL`,
     );
 
+    // call_transcripts.sentiment
+    await queryRunner.query(
+      `ALTER TABLE "call_transcripts" ADD COLUMN IF NOT EXISTS "sentiment" jsonb DEFAULT NULL`,
+    );
+
+    // call_topics.createdBy
+    await queryRunner.query(
+      `ALTER TABLE "call_topics" ADD COLUMN IF NOT EXISTS "createdBy" character varying(200) DEFAULT NULL`,
+    );
+
     // call_dictionary_entries table
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS "call_dictionary_entries" (
@@ -46,6 +56,12 @@ export class AddCallsMissingColumns1741400000000 implements MigrationInterface {
     await queryRunner.query(`DROP TABLE IF EXISTS "call_dictionary_entries"`);
     await queryRunner.query(
       `ALTER TABLE "call_transcripts" DROP COLUMN IF EXISTS "dictionaryApplied"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "call_transcripts" DROP COLUMN IF EXISTS "sentiment"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "call_topics" DROP COLUMN IF EXISTS "createdBy"`,
     );
     await queryRunner.query(
       `ALTER TABLE "calls" DROP COLUMN IF EXISTS "isFavorite"`,
