@@ -86,7 +86,7 @@ export class CallsController {
   }
 
   @Get('unwanted-words')
-  @Permissions('calls_settings')
+  @Permissions('calls')
   getUnwantedWords() {
     return this.calls.getUnwantedWords();
   }
