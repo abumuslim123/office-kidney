@@ -4,6 +4,7 @@ const sidebarItems = [
   { to: '/calls/settings/provider', label: 'Провайдер' },
   { to: '/calls/settings/dictionary', label: 'Словарь' },
   { to: '/calls/settings/topics', label: 'Тематики' },
+  { to: '/calls/settings/unwanted-words', label: 'Нежелательные слова' },
   { to: '/calls/settings/favorites', label: 'Избранное' },
   { to: '/calls/settings/recording', label: 'Режим записи' },
   { to: '/calls/settings/reports', label: 'Отчеты' },

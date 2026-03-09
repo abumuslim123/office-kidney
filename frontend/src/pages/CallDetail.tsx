@@ -20,6 +20,7 @@ type CallTranscript = {
   turns?: { speaker: string; text: string; start?: number; end?: number }[] | null;
   words?: { word: string; start: number; end: number; speaker: string }[] | null;
   sentiment?: CallSentiment | null;
+  dictionaryApplied?: { original: string; corrected: string; count: number }[] | null;
   language: string | null;
   provider: string;
 };
@@ -88,6 +89,8 @@ export default function CallDetail() {
   const [error, setError] = useState('');
   const [currentTime, setCurrentTime] = useState(0);
   const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
+  const [fillerWords, setFillerWords] = useState<string[]>([]);
+  const [negativeWords, setNegativeWords] = useState<string[]>([]);
   const playerRef = useRef<AudioPlayerHandle>(null);
 
   useEffect(() => {
@@ -98,6 +101,13 @@ export default function CallDetail() {
       .then((res) => setCall(res.data))
       .catch((err) => setError(err?.response?.data?.message || 'Ошибка загрузки'))
       .finally(() => setLoading(false));
+    api
+      .get<{ fillerWords: string[]; negativeWords: string[] }>('/calls/unwanted-words')
+      .then((res) => {
+        setFillerWords(res.data.fillerWords);
+        setNegativeWords(res.data.negativeWords);
+      })
+      .catch(() => {});
   }, [id]);
 
   const handleSeek = useCallback((time: number) => {
@@ -136,7 +146,7 @@ export default function CallDetail() {
       for (let i = 0; i <= opWords.length - kwParts.length; i++) {
         let matched = true;
         for (let j = 0; j < kwParts.length; j++) {
-          if (!clean(opWords[i + j].word).includes(kwParts[j])) {
+          if (clean(opWords[i + j].word) !== kwParts[j]) {
             matched = false;
             break;
           }
@@ -149,18 +159,61 @@ export default function CallDetail() {
     return result;
   }, [call]);
 
+  // Compute unwanted word matches for sidebar panel
+  const unwantedWordMatches = useMemo(() => {
+    const wordsList = call?.transcript?.words;
+    if (!wordsList?.length || (!fillerWords.length && !negativeWords.length)) return [];
+    const opWords = wordsList.filter((w) => w.speaker === 'operator');
+    const cleanW = (s: string) => s.toLowerCase().replace(/[.,!?;:"""''()]/g, '');
+    const results: { word: string; occurrences: number; timestamps: number[]; type: 'filler' | 'negative' }[] = [];
+
+    const scan = (list: string[], type: 'filler' | 'negative') => {
+      for (const phrase of list) {
+        const parts = phrase.toLowerCase().split(/\s+/).filter(Boolean);
+        if (!parts.length) continue;
+        const timestamps: number[] = [];
+        for (let i = 0; i <= opWords.length - parts.length; i++) {
+          let matched = true;
+          for (let j = 0; j < parts.length; j++) {
+            if (cleanW(opWords[i + j].word) !== parts[j]) {
+              matched = false;
+              break;
+            }
+          }
+          if (matched) timestamps.push(opWords[i].start);
+        }
+        if (timestamps.length > 0) {
+          results.push({ word: phrase, occurrences: timestamps.length, timestamps, type });
+        }
+      }
+    };
+
+    scan(fillerWords, 'filler');
+    scan(negativeWords, 'negative');
+    return results;
+  }, [call, fillerWords, negativeWords]);
+
   // Compute keyword positions for waveform markers (must be before early returns)
   const keywordMarkers = useMemo(() => {
-    if (!keywordTimestamps.length) return [];
+    const markers: { time: number; label: string; color: string }[] = [];
     const activeKwSet = new Set(activeTopicKeywords.map((k) => k.toLowerCase()));
-    return keywordTimestamps.map((kt) => ({
-      time: kt.time,
-      label: kt.keyword,
-      color: activeKwSet.has(kt.keyword.toLowerCase())
-        ? 'rgba(34, 197, 94, 0.6)'
-        : 'rgba(234, 179, 8, 0.5)',
-    }));
-  }, [keywordTimestamps, activeTopicKeywords]);
+    for (const kt of keywordTimestamps) {
+      markers.push({
+        time: kt.time,
+        label: kt.keyword,
+        color: activeKwSet.has(kt.keyword.toLowerCase())
+          ? 'rgba(34, 197, 94, 0.6)'
+          : 'rgba(234, 179, 8, 0.5)',
+      });
+    }
+    for (const uw of unwantedWordMatches) {
+      const color = uw.type === 'negative' ? 'rgba(239, 68, 68, 0.55)' : 'rgba(249, 115, 22, 0.5)';
+      for (const t of uw.timestamps) {
+        markers.push({ time: t, label: uw.word, color });
+      }
+    }
+    return markers;
+  }, [keywordTimestamps, activeTopicKeywords, unwantedWordMatches]);
 
   if (loading) {
     return (
@@ -253,6 +306,19 @@ export default function CallDetail() {
                     )}
                   </>
                 )}
+                {call.transcript?.dictionaryApplied && call.transcript.dictionaryApplied.length > 0 && (
+                  <>
+                    <span className="text-gray-300">|</span>
+                    <span
+                      className="text-purple-600"
+                      title={call.transcript.dictionaryApplied
+                        .map((d) => `«${d.original}» → «${d.corrected}» (×${d.count})`)
+                        .join('\n')}
+                    >
+                      📖 словарь ({call.transcript.dictionaryApplied.length})
+                    </span>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -283,6 +349,8 @@ export default function CallDetail() {
                   onSeek={handleSeek}
                   operatorName={call.employeeName || 'Оператор'}
                   abonentName={call.clientName || call.clientPhone || 'Собеседник'}
+                  fillerWords={fillerWords}
+                  negativeWords={negativeWords}
                 />
               ) : (
                 <div className="text-sm text-gray-600 whitespace-pre-wrap">{call.transcript.text}</div>
@@ -295,6 +363,7 @@ export default function CallDetail() {
                 onTopicClick={handleTopicClick}
                 keywordTimestamps={keywordTimestamps}
                 onSeek={handleSeek}
+                unwantedWords={unwantedWordMatches}
               />
             </div>
           </div>

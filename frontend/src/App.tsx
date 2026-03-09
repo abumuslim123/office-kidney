@@ -28,6 +28,8 @@ import CallsSettingsLayout from './pages/CallsSettingsLayout';
 import CallsFavorites from './pages/CallsFavorites';
 import CallsRecording from './pages/CallsRecording';
 import CallsReports from './pages/CallsReports';
+import CallsReportAnalysis from './pages/CallsReportAnalysis';
+import CallsUnwantedWords from './pages/CallsUnwantedWords';
 import Processes from './pages/Processes';
 import Settings from './pages/Settings';
 import ResumeLayout from './components/resume/ResumeLayout';
@@ -93,9 +95,11 @@ function App() {
           <Route path="provider" element={<CallsSettings />} />
           <Route path="dictionary" element={<CallDictionary />} />
           <Route path="topics" element={<CallTopics />} />
+          <Route path="unwanted-words" element={<CallsUnwantedWords />} />
           <Route path="favorites" element={<CallsFavorites />} />
           <Route path="recording" element={<CallsRecording />} />
           <Route path="reports" element={<CallsReports />} />
+          <Route path="reports/analysis" element={<CallsReportAnalysis />} />
         </Route>
         <Route path="hr" element={<Navigate to="/hr/hunter" replace />} />
         <Route path="hr/hunter" element={<ProtectedRoute permissions={['hr']}><HrHunter /></ProtectedRoute>} />

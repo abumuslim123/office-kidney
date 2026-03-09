@@ -16,6 +16,10 @@ export const CALLS_TRITECH_CLIENT_SECRET = 'calls_tritech_client_secret';
 export const CALLS_TRITECH_USERNAME = 'calls_tritech_username';
 export const CALLS_TRITECH_PASSWORD = 'calls_tritech_password';
 
+// Нежелательные слова (JSON arrays)
+export const CALLS_FILLER_WORDS = 'calls_filler_words';
+export const CALLS_NEGATIVE_WORDS = 'calls_negative_words';
+
 // Legacy keys (Polza.ai)
 export const CALLS_POLZA_API_KEY = 'calls_polza_api_key';
 export const CALLS_POLZA_API_BASE = 'calls_polza_api_base';
