@@ -7,25 +7,28 @@ export class DoctorTypeToArray1741000006500 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Добавить новую колонку-массив
     await queryRunner.query(
-      `ALTER TABLE "resume_candidates" ADD COLUMN "doctorTypes" text[] NOT NULL DEFAULT '{}'`,
+      `ALTER TABLE "resume_candidates" ADD COLUMN IF NOT EXISTS "doctorTypes" text[] NOT NULL DEFAULT '{}'`,
     );
 
     // Перенести данные: если doctorType был заполнен → массив из одного элемента
-    await queryRunner.query(
-      `UPDATE "resume_candidates" SET "doctorTypes" = ARRAY["doctorType"] WHERE "doctorType" IS NOT NULL`,
+    const hasDoctorType = await queryRunner.query(
+      `SELECT 1 FROM information_schema.columns WHERE table_name = 'resume_candidates' AND column_name = 'doctorType'`,
     );
-
-    // Удалить старый индекс и колонку
-    await queryRunner.query(
-      `DROP INDEX IF EXISTS "IDX_resume_candidates_doctorType"`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE "resume_candidates" DROP COLUMN "doctorType"`,
-    );
+    if (hasDoctorType.length > 0) {
+      await queryRunner.query(
+        `UPDATE "resume_candidates" SET "doctorTypes" = ARRAY["doctorType"] WHERE "doctorType" IS NOT NULL`,
+      );
+      await queryRunner.query(
+        `DROP INDEX IF EXISTS "IDX_resume_candidates_doctorType"`,
+      );
+      await queryRunner.query(
+        `ALTER TABLE "resume_candidates" DROP COLUMN "doctorType"`,
+      );
+    }
 
     // Создать GIN-индекс для массива
     await queryRunner.query(
-      `CREATE INDEX "IDX_resume_candidates_doctorTypes" ON "resume_candidates" USING GIN ("doctorTypes")`,
+      `CREATE INDEX IF NOT EXISTS "IDX_resume_candidates_doctorTypes" ON "resume_candidates" USING GIN ("doctorTypes")`,
     );
   }
 

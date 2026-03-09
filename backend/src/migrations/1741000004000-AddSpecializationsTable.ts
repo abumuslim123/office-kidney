@@ -11,7 +11,7 @@ export class AddSpecializationsTable1741000004000
   public async up(queryRunner: QueryRunner): Promise<void> {
     // 1. Создание таблицы
     await queryRunner.query(`
-      CREATE TABLE "resume_specializations" (
+      CREATE TABLE IF NOT EXISTS "resume_specializations" (
         "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
         "name" varchar NOT NULL,
         "aliases" text[] NOT NULL DEFAULT '{}',
@@ -103,7 +103,7 @@ export class AddSpecializationsTable1741000004000
       const aliasLiteral =
         '{' + aliases.map((a) => `"${a}"`).join(',') + '}';
       await queryRunner.query(
-        `INSERT INTO "resume_specializations" ("name", "aliases") VALUES ($1, $2)`,
+        `INSERT INTO "resume_specializations" ("name", "aliases") VALUES ($1, $2) ON CONFLICT ("name") DO NOTHING`,
         [name, aliasLiteral],
       );
     }

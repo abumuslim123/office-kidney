@@ -2,31 +2,27 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class AddResumeModule1741000000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
-    // Create enum types
+    // Create enum types (IF NOT EXISTS via DO block for idempotency)
     await queryRunner.query(`
-      CREATE TYPE "resume_processing_status" AS ENUM (
-        'PENDING', 'EXTRACTING', 'PARSING', 'COMPLETED', 'FAILED'
-      )
-    `);
-    await queryRunner.query(`
-      CREATE TYPE "resume_qualification_category" AS ENUM (
-        'HIGHEST', 'FIRST', 'SECOND', 'NONE'
-      )
-    `);
-    await queryRunner.query(`
-      CREATE TYPE "resume_candidate_status" AS ENUM (
-        'NEW', 'REVIEWING', 'INVITED', 'HIRED'
-      )
-    `);
-    await queryRunner.query(`
-      CREATE TYPE "resume_candidate_priority" AS ENUM (
-        'ACTIVE', 'RESERVE', 'NOT_SUITABLE', 'ARCHIVE', 'DELETED'
-      )
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'resume_processing_status') THEN
+          CREATE TYPE "resume_processing_status" AS ENUM ('PENDING','EXTRACTING','PARSING','COMPLETED','FAILED');
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'resume_qualification_category') THEN
+          CREATE TYPE "resume_qualification_category" AS ENUM ('HIGHEST','FIRST','SECOND','NONE');
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'resume_candidate_status') THEN
+          CREATE TYPE "resume_candidate_status" AS ENUM ('NEW','REVIEWING','INVITED','HIRED');
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'resume_candidate_priority') THEN
+          CREATE TYPE "resume_candidate_priority" AS ENUM ('ACTIVE','RESERVE','NOT_SUITABLE','ARCHIVE','DELETED');
+        END IF;
+      END $$
     `);
 
     // Create resume_uploaded_files
     await queryRunner.query(`
-      CREATE TABLE "resume_uploaded_files" (
+      CREATE TABLE IF NOT EXISTS "resume_uploaded_files" (
         "id"           uuid        NOT NULL DEFAULT gen_random_uuid(),
         "createdAt"    timestamp   NOT NULL DEFAULT now(),
         "originalName" varchar(500) NOT NULL,
@@ -39,7 +35,7 @@ export class AddResumeModule1741000000000 implements MigrationInterface {
 
     // Create resume_candidates
     await queryRunner.query(`
-      CREATE TABLE "resume_candidates" (
+      CREATE TABLE IF NOT EXISTS "resume_candidates" (
         "id"                        uuid        NOT NULL DEFAULT gen_random_uuid(),
         "createdAt"                 timestamp   NOT NULL DEFAULT now(),
         "updatedAt"                 timestamp   NOT NULL DEFAULT now(),
@@ -87,19 +83,19 @@ export class AddResumeModule1741000000000 implements MigrationInterface {
     `);
 
     // Indexes on resume_candidates
-    await queryRunner.query(`CREATE INDEX "IDX_resume_candidates_specialization"          ON "resume_candidates" ("specialization")`);
-    await queryRunner.query(`CREATE INDEX "IDX_resume_candidates_qualificationCategory"   ON "resume_candidates" ("qualificationCategory")`);
-    await queryRunner.query(`CREATE INDEX "IDX_resume_candidates_status"                 ON "resume_candidates" ("status")`);
-    await queryRunner.query(`CREATE INDEX "IDX_resume_candidates_priority"               ON "resume_candidates" ("priority")`);
-    await queryRunner.query(`CREATE INDEX "IDX_resume_candidates_branches"               ON "resume_candidates" USING GIN ("branches")`);
-    await queryRunner.query(`CREATE INDEX "IDX_resume_candidates_processingStatus"       ON "resume_candidates" ("processingStatus")`);
-    await queryRunner.query(`CREATE INDEX "IDX_resume_candidates_accreditationExpiryDate" ON "resume_candidates" ("accreditationExpiryDate")`);
-    await queryRunner.query(`CREATE INDEX "IDX_resume_candidates_phone"                 ON "resume_candidates" ("phone")`);
-    await queryRunner.query(`CREATE INDEX "IDX_resume_candidates_email"                 ON "resume_candidates" ("email")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_resume_candidates_specialization"          ON "resume_candidates" ("specialization")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_resume_candidates_qualificationCategory"   ON "resume_candidates" ("qualificationCategory")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_resume_candidates_status"                 ON "resume_candidates" ("status")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_resume_candidates_priority"               ON "resume_candidates" ("priority")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_resume_candidates_branches"               ON "resume_candidates" USING GIN ("branches")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_resume_candidates_processingStatus"       ON "resume_candidates" ("processingStatus")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_resume_candidates_accreditationExpiryDate" ON "resume_candidates" ("accreditationExpiryDate")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_resume_candidates_phone"                 ON "resume_candidates" ("phone")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_resume_candidates_email"                 ON "resume_candidates" ("email")`);
 
     // Create resume_work_history
     await queryRunner.query(`
-      CREATE TABLE "resume_work_history" (
+      CREATE TABLE IF NOT EXISTS "resume_work_history" (
         "id"           uuid        NOT NULL DEFAULT gen_random_uuid(),
         "organization" varchar(500) NOT NULL,
         "position"     varchar(500) NOT NULL,
@@ -113,11 +109,11 @@ export class AddResumeModule1741000000000 implements MigrationInterface {
         CONSTRAINT "PK_resume_work_history" PRIMARY KEY ("id")
       )
     `);
-    await queryRunner.query(`CREATE INDEX "IDX_resume_work_history_candidateId" ON "resume_work_history" ("candidateId")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_resume_work_history_candidateId" ON "resume_work_history" ("candidateId")`);
 
     // Create resume_education
     await queryRunner.query(`
-      CREATE TABLE "resume_education" (
+      CREATE TABLE IF NOT EXISTS "resume_education" (
         "id"          uuid        NOT NULL DEFAULT gen_random_uuid(),
         "institution" varchar(300) NOT NULL,
         "faculty"     varchar,
@@ -131,11 +127,11 @@ export class AddResumeModule1741000000000 implements MigrationInterface {
         CONSTRAINT "PK_resume_education" PRIMARY KEY ("id")
       )
     `);
-    await queryRunner.query(`CREATE INDEX "IDX_resume_education_candidateId" ON "resume_education" ("candidateId")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_resume_education_candidateId" ON "resume_education" ("candidateId")`);
 
     // Create resume_cme_courses
     await queryRunner.query(`
-      CREATE TABLE "resume_cme_courses" (
+      CREATE TABLE IF NOT EXISTS "resume_cme_courses" (
         "id"                uuid        NOT NULL DEFAULT gen_random_uuid(),
         "courseName"        varchar(500) NOT NULL,
         "provider"          varchar,
@@ -147,11 +143,11 @@ export class AddResumeModule1741000000000 implements MigrationInterface {
         CONSTRAINT "PK_resume_cme_courses" PRIMARY KEY ("id")
       )
     `);
-    await queryRunner.query(`CREATE INDEX "IDX_resume_cme_courses_candidateId" ON "resume_cme_courses" ("candidateId")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_resume_cme_courses_candidateId" ON "resume_cme_courses" ("candidateId")`);
 
     // Create resume_candidate_notes
     await queryRunner.query(`
-      CREATE TABLE "resume_candidate_notes" (
+      CREATE TABLE IF NOT EXISTS "resume_candidate_notes" (
         "id"          uuid        NOT NULL DEFAULT gen_random_uuid(),
         "createdAt"   timestamp   NOT NULL DEFAULT now(),
         "updatedAt"   timestamp   NOT NULL DEFAULT now(),
@@ -161,11 +157,11 @@ export class AddResumeModule1741000000000 implements MigrationInterface {
         CONSTRAINT "PK_resume_candidate_notes" PRIMARY KEY ("id")
       )
     `);
-    await queryRunner.query(`CREATE INDEX "IDX_resume_candidate_notes_candidateId" ON "resume_candidate_notes" ("candidateId")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_resume_candidate_notes_candidateId" ON "resume_candidate_notes" ("candidateId")`);
 
     // Create resume_candidate_tags
     await queryRunner.query(`
-      CREATE TABLE "resume_candidate_tags" (
+      CREATE TABLE IF NOT EXISTS "resume_candidate_tags" (
         "id"          uuid        NOT NULL DEFAULT gen_random_uuid(),
         "label"       varchar(100) NOT NULL,
         "color"       varchar(50),
@@ -173,12 +169,12 @@ export class AddResumeModule1741000000000 implements MigrationInterface {
         CONSTRAINT "PK_resume_candidate_tags" PRIMARY KEY ("id")
       )
     `);
-    await queryRunner.query(`CREATE INDEX "IDX_resume_candidate_tags_candidateId" ON "resume_candidate_tags" ("candidateId")`);
-    await queryRunner.query(`CREATE INDEX "IDX_resume_candidate_tags_label"       ON "resume_candidate_tags" ("label")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_resume_candidate_tags_candidateId" ON "resume_candidate_tags" ("candidateId")`);
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_resume_candidate_tags_label"       ON "resume_candidate_tags" ("label")`);
 
     // Create resume_telegram_chats
     await queryRunner.query(`
-      CREATE TABLE "resume_telegram_chats" (
+      CREATE TABLE IF NOT EXISTS "resume_telegram_chats" (
         "chatId"       bigint      NOT NULL,
         "authorizedAt" timestamp   NOT NULL DEFAULT now(),
         "username"     varchar,
