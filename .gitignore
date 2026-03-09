@@ -41,3 +41,10 @@ backend/uploads/
 
 # Scraped docs
 scraped_3ivox/
+
+# Screenshots
+*.png
+*.jpg
+*.jpeg
+!frontend/public/**
+.playwright-mcp/
