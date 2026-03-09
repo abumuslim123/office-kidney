@@ -7,10 +7,10 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 export class AddCandidateDoctorType1741000005000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
-      `ALTER TABLE "resume_candidates" ADD COLUMN IF NOT EXISTS "doctorType" VARCHAR(20) DEFAULT NULL`,
+      `ALTER TABLE "resume_candidates" ADD COLUMN "doctorType" VARCHAR(20) DEFAULT NULL`,
     );
     await queryRunner.query(
-      `CREATE INDEX IF NOT EXISTS "IDX_resume_candidates_doctorType" ON "resume_candidates" ("doctorType")`,
+      `CREATE INDEX "IDX_resume_candidates_doctorType" ON "resume_candidates" ("doctorType")`,
     );
   }
 
