@@ -8,14 +8,18 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  */
 export class AddCandidateScoring1741000006000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
-    // 1. Расширение pgvector
-    await queryRunner.query(
-      `CREATE EXTENSION IF NOT EXISTS "vector"`,
+    // 1. Расширение pgvector (skip if not available — e.g. local dev without pgvector)
+    const [{ available }] = await queryRunner.query(
+      `SELECT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'vector') AS available`,
     );
+    const hasVector = available === true || available === 't';
+    if (hasVector) {
+      await queryRunner.query(`CREATE EXTENSION IF NOT EXISTS "vector"`);
+    }
 
     // 2. Таблица AI-оценок
     await queryRunner.query(`
-      CREATE TABLE "resume_candidate_scores" (
+      CREATE TABLE IF NOT EXISTS "resume_candidate_scores" (
         "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
         "createdAt" TIMESTAMP NOT NULL DEFAULT now(),
         "candidateId" uuid NOT NULL,
@@ -39,33 +43,35 @@ export class AddCandidateScoring1741000006000 implements MigrationInterface {
 
     // 3. Индексы для таблицы оценок
     await queryRunner.query(
-      `CREATE INDEX "IDX_rcs_candidateId" ON "resume_candidate_scores" ("candidateId")`,
+      `CREATE INDEX IF NOT EXISTS "IDX_rcs_candidateId" ON "resume_candidate_scores" ("candidateId")`,
     );
     await queryRunner.query(
-      `CREATE INDEX "IDX_rcs_totalScore" ON "resume_candidate_scores" ("totalScore")`,
+      `CREATE INDEX IF NOT EXISTS "IDX_rcs_totalScore" ON "resume_candidate_scores" ("totalScore")`,
     );
     await queryRunner.query(
-      `CREATE INDEX "IDX_rcs_isCurrent" ON "resume_candidate_scores" ("isCurrent") WHERE "isCurrent" = true`,
+      `CREATE INDEX IF NOT EXISTS "IDX_rcs_isCurrent" ON "resume_candidate_scores" ("isCurrent") WHERE "isCurrent" = true`,
     );
     await queryRunner.query(
-      `CREATE INDEX "IDX_rcs_specialization" ON "resume_candidate_scores" ("specialization")`,
+      `CREATE INDEX IF NOT EXISTS "IDX_rcs_specialization" ON "resume_candidate_scores" ("specialization")`,
     );
 
     // 4. Кешированный балл в candidates
     await queryRunner.query(
-      `ALTER TABLE "resume_candidates" ADD COLUMN "aiScore" float`,
+      `ALTER TABLE "resume_candidates" ADD COLUMN IF NOT EXISTS "aiScore" float`,
     );
     await queryRunner.query(
-      `CREATE INDEX "IDX_resume_candidates_aiScore" ON "resume_candidates" ("aiScore")`,
+      `CREATE INDEX IF NOT EXISTS "IDX_resume_candidates_aiScore" ON "resume_candidates" ("aiScore")`,
     );
 
     // 5. Вектор эмбеддинга в candidates (768 — размерность nomic-embed-text)
-    await queryRunner.query(
-      `ALTER TABLE "resume_candidates" ADD COLUMN "embedding" vector(768)`,
-    );
-    await queryRunner.query(
-      `CREATE INDEX "IDX_resume_candidates_embedding" ON "resume_candidates" USING hnsw ("embedding" vector_cosine_ops)`,
-    );
+    if (hasVector) {
+      await queryRunner.query(
+        `ALTER TABLE "resume_candidates" ADD COLUMN IF NOT EXISTS "embedding" vector(768)`,
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_resume_candidates_embedding" ON "resume_candidates" USING hnsw ("embedding" vector_cosine_ops)`,
+      );
+    }
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
