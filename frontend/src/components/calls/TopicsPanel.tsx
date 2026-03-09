@@ -1,3 +1,5 @@
+import React, { useMemo } from 'react';
+
 type TopicMatch = {
   topicId: string;
   topicName: string;
@@ -32,25 +34,30 @@ function formatTime(sec: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export default function TopicsPanel({ matches, activeTopicId, onTopicClick, keywordTimestamps, onSeek, unwantedWords = [] }: TopicsPanelProps) {
-  const grouped = new Map<string, TopicMatch[]>();
-  matches.forEach((m) => {
-    const list = grouped.get(m.topicId) || [];
-    list.push(m);
-    grouped.set(m.topicId, list);
-  });
+function TopicsPanel({ matches, activeTopicId, onTopicClick, keywordTimestamps, onSeek, unwantedWords = [] }: TopicsPanelProps) {
+  const grouped = useMemo(() => {
+    const map = new Map<string, TopicMatch[]>();
+    matches.forEach((m) => {
+      const list = map.get(m.topicId) || [];
+      list.push(m);
+      map.set(m.topicId, list);
+    });
+    return map;
+  }, [matches]);
 
-  // Build keyword -> timestamps map
-  const tsMap = new Map<string, number[]>();
-  keywordTimestamps?.forEach((kt) => {
-    const key = kt.keyword.toLowerCase();
-    const list = tsMap.get(key) || [];
-    list.push(kt.time);
-    tsMap.set(key, list);
-  });
+  const tsMap = useMemo(() => {
+    const map = new Map<string, number[]>();
+    keywordTimestamps?.forEach((kt) => {
+      const key = kt.keyword.toLowerCase();
+      const list = map.get(key) || [];
+      list.push(kt.time);
+      map.set(key, list);
+    });
+    return map;
+  }, [keywordTimestamps]);
 
-  const fillerMatches = unwantedWords.filter((w) => w.type === 'filler');
-  const negativeMatches = unwantedWords.filter((w) => w.type === 'negative');
+  const fillerMatches = useMemo(() => unwantedWords.filter((w) => w.type === 'filler'), [unwantedWords]);
+  const negativeMatches = useMemo(() => unwantedWords.filter((w) => w.type === 'negative'), [unwantedWords]);
 
   return (
     <div>
@@ -192,3 +199,5 @@ export default function TopicsPanel({ matches, activeTopicId, onTopicClick, keyw
     </div>
   );
 }
+
+export default React.memo(TopicsPanel);

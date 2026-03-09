@@ -240,7 +240,8 @@ export class TritechAudioService {
       }
     }
 
-    throw new BadRequestException('3iTech: таймаут ожидания результата распознавания');
+    this.logger.error(`3iTech polling timeout: taskId=${taskId}, attempts=${maxAttempts}`);
+    throw new BadRequestException(`3iTech: таймаут ожидания результата распознавания (task ${taskId})`);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -303,17 +304,7 @@ export class TritechAudioService {
     }
 
     if (!phrases.length) {
-      return {
-        text: 'Результат распознавания пуст',
-        operatorText: null,
-        abonentText: null,
-        turns: null,
-        words: null,
-        duration,
-        speechDuration,
-        silenceDuration,
-        sentiment: null,
-      };
+      throw new BadRequestException('3iTech: результат распознавания пуст — речь не обнаружена');
     }
 
     // Determine which channel is operator

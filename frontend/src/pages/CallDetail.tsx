@@ -95,19 +95,25 @@ export default function CallDetail() {
 
   useEffect(() => {
     if (!id) return;
+    const controller = new AbortController();
+    const signal = controller.signal;
     setLoading(true);
     api
-      .get(`/calls/${id}`)
+      .get(`/calls/${id}`, { signal })
       .then((res) => setCall(res.data))
-      .catch((err) => setError(err?.response?.data?.message || 'Ошибка загрузки'))
+      .catch((err) => {
+        if (err?.name === 'CanceledError') return;
+        setError(err?.response?.data?.message || 'Ошибка загрузки');
+      })
       .finally(() => setLoading(false));
     api
-      .get<{ fillerWords: string[]; negativeWords: string[] }>('/calls/unwanted-words')
+      .get<{ fillerWords: string[]; negativeWords: string[] }>('/calls/unwanted-words', { signal })
       .then((res) => {
         setFillerWords(res.data.fillerWords);
         setNegativeWords(res.data.negativeWords);
       })
       .catch(() => {});
+    return () => controller.abort();
   }, [id]);
 
   const handleSeek = useCallback((time: number) => {

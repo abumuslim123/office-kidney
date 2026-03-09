@@ -330,7 +330,7 @@ export class AitunnelAudioService {
         // Убираем возможную markdown-обёртку
         const cleaned = content.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
         const arr = JSON.parse(cleaned);
-        if (Array.isArray(arr) && arr.length > 0 && arr[0].speaker && arr[0].text) {
+        if (Array.isArray(arr) && arr.length > 0 && arr.every((item: any) => item?.speaker && item?.text)) {
           return arr.map((item: { speaker: string; text: string }) => ({
             speaker: item.speaker === 'abonent' ? 'abonent' : 'operator',
             text: String(item.text),

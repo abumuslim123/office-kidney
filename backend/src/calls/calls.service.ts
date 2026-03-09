@@ -962,7 +962,16 @@ export class CallsService {
         const greetingPattern = /здравствуйте|добрый\s*(день|вечер|утро)|чем\s*(могу|можем)\s*помочь|клиника|кидней|kidney|слушаю\s*вас|алл[её]/i;
         const leftHasGreeting = greetingPattern.test(leftText.slice(0, 300));
         const rightHasGreeting = greetingPattern.test(rightText.slice(0, 300));
-        const leftIsOperator = leftHasGreeting || !rightHasGreeting;
+        let leftIsOperator: boolean;
+        if (leftHasGreeting !== rightHasGreeting) {
+          leftIsOperator = leftHasGreeting;
+        } else {
+          // Вторичная эвристика: оператор обычно говорит больше в начале разговора
+          const leftFirstWords = leftText.slice(0, 100).split(/\s+/).filter(Boolean).length;
+          const rightFirstWords = rightText.slice(0, 100).split(/\s+/).filter(Boolean).length;
+          leftIsOperator = leftFirstWords >= rightFirstWords;
+          this.logger.log(`Heuristic fallback: leftWords=${leftFirstWords}, rightWords=${rightFirstWords}`);
+        }
         this.logger.log(`Channel detection: left=${leftHasGreeting ? 'greeting' : 'no-greeting'}, right=${rightHasGreeting ? 'greeting' : 'no-greeting'}, leftIsOperator=${leftIsOperator}`);
 
         const operatorResponse = leftIsOperator ? leftResponse : rightResponse;
@@ -1209,11 +1218,12 @@ export class CallsService {
       throw new BadRequestException('Ошибка транскрибации');
     } finally {
       if (tempPaths) {
-        await fs.unlink(tempPaths.leftPath).catch(() => {});
-        await fs.unlink(tempPaths.rightPath).catch(() => {});
+        const { leftPath, rightPath } = tempPaths;
+        await fs.unlink(leftPath).catch(e => this.logger.warn(`Не удалось удалить temp-файл ${leftPath}: ${e.message}`));
+        await fs.unlink(rightPath).catch(e => this.logger.warn(`Не удалось удалить temp-файл ${rightPath}: ${e.message}`));
       }
       if (cleanPath) {
-        await fs.unlink(cleanPath).catch(() => {});
+        await fs.unlink(cleanPath).catch(e => this.logger.warn(`Не удалось удалить temp-файл ${cleanPath}: ${e.message}`));
       }
     }
   }
@@ -1232,23 +1242,30 @@ export class CallsService {
 
     const appliedMap = new Map<string, { original: string; corrected: string; count: number }>();
 
+    // Single-pass replacement: объединяем все паттерны в один regex
+    // чтобы избежать зацикливания при конфликтующих заменах (A→B, B→A)
+    const replacementMap = new Map(entries.map(e => [e.originalWord.toLowerCase(), e]));
+    const escaped = [...entries]
+      .sort((a, b) => b.originalWord.length - a.originalWord.length)
+      .map(e => e.originalWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const combinedRegex = new RegExp(`(${escaped.join('|')})`, 'gi');
+
     const applyReplacements = (text: string | null): string | null => {
       if (!text) return text;
-      let corrected = text;
-      for (const entry of entries) {
-        const regex = new RegExp(entry.originalWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-        const matches = corrected.match(regex);
-        if (matches) {
+      const corrected = text.replace(combinedRegex, (match) => {
+        const entry = replacementMap.get(match.toLowerCase());
+        if (entry) {
           const key = entry.originalWord.toLowerCase();
           const prev = appliedMap.get(key);
           appliedMap.set(key, {
             original: entry.originalWord,
             corrected: entry.correctedWord,
-            count: (prev?.count || 0) + matches.length,
+            count: (prev?.count || 0) + 1,
           });
+          return entry.correctedWord;
         }
-        corrected = corrected.replace(regex, entry.correctedWord);
-      }
+        return match;
+      });
       return corrected;
     };
 
@@ -1260,9 +1277,12 @@ export class CallsService {
       text: applyReplacements(t.text) || t.text,
     })) || null;
 
-    // Also correct words array (word-level tokens with timestamps)
+    // Correct words array (word-level tokens with timestamps)
+    // Двухпроходный подход: сначала собираем все замены, потом применяем от конца к началу
     const correctedWords = result.words;
     if (correctedWords?.length) {
+      const wordReplacements: { start: number; length: number; newTokens: typeof correctedWords }[] = [];
+
       for (const entry of entries) {
         const originalParts = entry.originalWord.toLowerCase().split(/\s+/).filter(Boolean);
         if (!originalParts.length) continue;
@@ -1275,35 +1295,27 @@ export class CallsService {
             if (clean !== originalParts[j]) { matched = false; break; }
           }
           if (matched) {
-            // Replace word tokens: distribute replacement across matched tokens
+            const newTokens: typeof correctedWords = [];
             if (replacementParts.length === 1) {
-              // Preserve punctuation from original word
               const orig = correctedWords[i].word;
               const leadPunct = orig.match(/^[.,!?;:"""''()]+/)?.[0] || '';
               const trailPunct = orig.match(/[.,!?;:"""''()]+$/)?.[0] || '';
-              correctedWords[i].word = leadPunct + replacementParts[0] + trailPunct;
-              // Remove extra matched tokens
-              for (let j = 1; j < originalParts.length; j++) {
-                correctedWords.splice(i + 1, 1);
-              }
+              newTokens.push({ ...correctedWords[i], word: leadPunct + replacementParts[0] + trailPunct });
             } else {
-              // Multi-word replacement: replace first, update rest or add
-              for (let j = 0; j < Math.max(originalParts.length, replacementParts.length); j++) {
-                if (j < originalParts.length && j < replacementParts.length) {
-                  correctedWords[i + j].word = replacementParts[j];
-                } else if (j >= originalParts.length) {
-                  // Insert additional word tokens
-                  correctedWords.splice(i + j, 0, { ...correctedWords[i + j - 1], word: replacementParts[j] });
-                } else {
-                  // Remove extra original tokens
-                  correctedWords.splice(i + j, 1);
-                  j--;
-                }
+              for (let j = 0; j < replacementParts.length; j++) {
+                const base = correctedWords[Math.min(i + j, i + originalParts.length - 1)];
+                newTokens.push({ ...base, word: replacementParts[j] });
               }
             }
+            wordReplacements.push({ start: i, length: originalParts.length, newTokens });
           }
         }
       }
+
+      // Применяем от конца к началу чтобы индексы не смещались
+      wordReplacements
+        .sort((a, b) => b.start - a.start)
+        .forEach(r => correctedWords.splice(r.start, r.length, ...r.newTokens));
     }
 
     const dictionaryApplied = appliedMap.size > 0

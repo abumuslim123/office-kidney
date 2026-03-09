@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 
 type Turn = {
   speaker: string;
@@ -102,7 +102,7 @@ function mapWordsToTurns(turns: Turn[], words: TimedWord[]): (TimedWord[] | null
   });
 }
 
-export default function TranscriptChat({
+function TranscriptChat({
   turns, words, currentTime, keywords, highlightedKeywords = [], onSeek,
   operatorName = 'Оператор', abonentName = 'Собеседник',
   fillerWords = [], negativeWords = [],
@@ -278,3 +278,5 @@ export default function TranscriptChat({
     </div>
   );
 }
+
+export default React.memo(TranscriptChat);
