@@ -27,6 +27,8 @@ import {
   CALLS_TRITECH_CLIENT_SECRET,
   CALLS_TRITECH_USERNAME,
   CALLS_TRITECH_PASSWORD,
+  CALLS_FILLER_WORDS,
+  CALLS_NEGATIVE_WORDS,
 } from './calls-settings.constants';
 import { AitunnelAudioService } from './aitunnel-audio.service';
 import { TritechAudioService } from './tritech-audio.service';
@@ -430,6 +432,192 @@ export class CallsService {
     };
   }
 
+  private static DEFAULT_FILLER_WORDS = [
+    'ну', 'вот', 'как бы', 'типа', 'короче', 'это самое', 'в общем',
+    'значит', 'так сказать', 'слушай', 'блин', 'ладно', 'прикинь',
+    'собственно', 'допустим', 'грубо говоря', 'на самом деле',
+  ];
+
+  private static DEFAULT_NEGATIVE_WORDS = [
+    'ужасно', 'отвратительно', 'кошмар', 'безобразие', 'хамство',
+    'грубо', 'некомпетентно', 'жалоба', 'претензия', 'скандал',
+    'обман', 'мошенничество', 'наглость', 'невежливо', 'недопустимо',
+    'плохо', 'ужас', 'позор', 'бардак', 'идиот',
+  ];
+
+  private async getWordList(key: string, defaults: string[]): Promise<string[]> {
+    const raw = await this.getSetting(key);
+    if (!raw) return defaults;
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : defaults;
+    } catch {
+      return defaults;
+    }
+  }
+
+  async getUnwantedWords() {
+    const fillerWords = await this.getWordList(CALLS_FILLER_WORDS, CallsService.DEFAULT_FILLER_WORDS);
+    const negativeWords = await this.getWordList(CALLS_NEGATIVE_WORDS, CallsService.DEFAULT_NEGATIVE_WORDS);
+    return { fillerWords, negativeWords };
+  }
+
+  async updateUnwantedWords(data: { fillerWords?: string[]; negativeWords?: string[] }) {
+    const updates: { key: string; value: string | null }[] = [];
+    if (data.fillerWords !== undefined) {
+      const words = data.fillerWords.map((w) => w.trim()).filter(Boolean);
+      updates.push({ key: CALLS_FILLER_WORDS, value: JSON.stringify(words) });
+    }
+    if (data.negativeWords !== undefined) {
+      const words = data.negativeWords.map((w) => w.trim()).filter(Boolean);
+      updates.push({ key: CALLS_NEGATIVE_WORDS, value: JSON.stringify(words) });
+    }
+    for (const { key, value } of updates) {
+      let row = await this.settingsRepo.findOne({ where: { key } });
+      if (!row) {
+        row = this.settingsRepo.create({ key, value: value || '' });
+      } else {
+        row.value = value || '';
+      }
+      await this.settingsRepo.save(row);
+    }
+    return this.getUnwantedWords();
+  }
+
+  private static GREETING_PATTERNS = /здравствуйте|добрый\s*(день|вечер|утро)|приветствую|алл[её]/i;
+  private static FAREWELL_PATTERNS = /до\s*свидания|всего\s*доброго|всего\s*хорошего|хорошего\s*дня|спасибо.*за\s*(звонок|обращение)|до\s*встречи/i;
+
+  private countPatternInText(text: string, words: string[]): number {
+    const lower = text.toLowerCase();
+    let count = 0;
+    for (const w of words) {
+      const re = new RegExp(w.replace(/\s+/g, '\\s+'), 'gi');
+      const matches = lower.match(re);
+      if (matches) count += matches.length;
+    }
+    return count;
+  }
+
+  async getReportAnalysis(filters: { from?: Date; to?: Date; topics?: string[] }) {
+    // Get filtered call ids
+    const idsQb = this.callRepo.createQueryBuilder('c').select('c.id', 'id');
+    if (filters.from) idsQb.andWhere('c."callAt" >= :from', { from: filters.from });
+    if (filters.to) idsQb.andWhere('c."callAt" <= :to', { to: filters.to });
+    if (filters.topics?.length) {
+      idsQb.andWhere((qb) => {
+        const sub = qb
+          .subQuery()
+          .select('m2."callId"')
+          .from(CallTopicMatch, 'm2')
+          .where('m2."topicId" IN (:...filterTopics)', { filterTopics: filters.topics })
+          .getQuery();
+        return `c.id IN ${sub}`;
+      });
+    }
+    const allCallIds = (await idsQb.getRawMany<{ id: string }>()).map((r) => r.id);
+
+    // Only transcribed calls
+    const transcribedCalls = allCallIds.length
+      ? await this.callRepo
+          .createQueryBuilder('c')
+          .where('c.id IN (:...ids)', { ids: allCallIds })
+          .andWhere('c.status = :status', { status: 'transcribed' })
+          .getMany()
+      : [];
+    const transcribedIds = transcribedCalls.map((c) => c.id);
+
+    // Topic stats
+    const topicStats = transcribedIds.length
+      ? await this.matchRepo
+          .createQueryBuilder('m')
+          .leftJoin(CallTopic, 't', 't.id = m."topicId"')
+          .select('t.id', 'topicId')
+          .addSelect('t.name', 'topicName')
+          .addSelect('COUNT(DISTINCT m."callId")', 'callsCount')
+          .addSelect('COALESCE(SUM(m."occurrences"), 0)', 'occurrences')
+          .where('m."callId" IN (:...ids)', { ids: transcribedIds })
+          .groupBy('t.id')
+          .addGroupBy('t.name')
+          .orderBy('SUM(m."occurrences")', 'DESC')
+          .getRawMany<{ topicId: string; topicName: string; callsCount: string; occurrences: string }>()
+      : [];
+
+    // Fetch transcripts for text analysis
+    const transcripts = transcribedIds.length
+      ? await this.transcriptRepo.find({ where: { callId: In(transcribedIds) } })
+      : [];
+    const transcriptMap = new Map(transcripts.map((t) => [t.callId, t]));
+
+    // Load dynamic word lists from settings
+    const fillerWords = await this.getWordList(CALLS_FILLER_WORDS, CallsService.DEFAULT_FILLER_WORDS);
+    const negativeWords = await this.getWordList(CALLS_NEGATIVE_WORDS, CallsService.DEFAULT_NEGATIVE_WORDS);
+
+    let fillerWordsTotal = 0;
+    let negativeWordsTotal = 0;
+    let greetedCount = 0;
+    let farewellCount = 0;
+    const fillerDetail = new Map<string, number>();
+    const negativeDetail = new Map<string, number>();
+
+    for (const call of transcribedCalls) {
+      const tr = transcriptMap.get(call.id);
+      if (!tr) continue;
+      const opText = tr.operatorText || '';
+      if (opText) {
+        fillerWordsTotal += this.countPatternInText(opText, fillerWords);
+        negativeWordsTotal += this.countPatternInText(opText, negativeWords);
+        for (const w of fillerWords) {
+          const re = new RegExp(w.replace(/\s+/g, '\\s+'), 'gi');
+          const m = opText.toLowerCase().match(re);
+          if (m) fillerDetail.set(w, (fillerDetail.get(w) || 0) + m.length);
+        }
+        for (const w of negativeWords) {
+          const re = new RegExp(w.replace(/\s+/g, '\\s+'), 'gi');
+          const m = opText.toLowerCase().match(re);
+          if (m) negativeDetail.set(w, (negativeDetail.get(w) || 0) + m.length);
+        }
+        if (CallsService.GREETING_PATTERNS.test(opText)) greetedCount++;
+        if (CallsService.FAREWELL_PATTERNS.test(opText)) farewellCount++;
+      }
+    }
+
+    // Duration stats
+    const totalDuration = transcribedCalls.reduce((s, c) => s + (c.durationSeconds || 0), 0);
+    const totalSpeech = transcribedCalls.reduce((s, c) => s + (c.speechDurationSeconds || 0), 0);
+    const totalSilence = transcribedCalls.reduce((s, c) => s + (c.silenceDurationSeconds || 0), 0);
+    const count = transcribedCalls.length || 1;
+
+    const toNum = (v: string) => parseInt(v, 10) || 0;
+
+    return {
+      totalCalls: allCallIds.length,
+      transcribedCalls: transcribedCalls.length,
+      transcribedCallIds: transcribedIds,
+      topics: topicStats.map((r) => ({
+        topicId: r.topicId,
+        topicName: r.topicName,
+        callsCount: toNum(r.callsCount),
+        occurrences: toNum(r.occurrences),
+      })),
+      summary: {
+        fillerWords: fillerWordsTotal,
+        negativeWords: negativeWordsTotal,
+        fillerWordsDetail: [...fillerDetail.entries()]
+          .map(([word, count]) => ({ word, count }))
+          .sort((a, b) => b.count - a.count),
+        negativeWordsDetail: [...negativeDetail.entries()]
+          .map(([word, count]) => ({ word, count }))
+          .sort((a, b) => b.count - a.count),
+        greetedCount,
+        farewellCount,
+        avgDuration: Math.round(totalDuration / count),
+        avgSpeechDuration: Math.round(totalSpeech / count),
+        avgSilenceDuration: Math.round(totalSilence / count),
+        speechRatio: totalDuration > 0 ? Math.round((totalSpeech / totalDuration) * 100) : 0,
+      },
+    };
+  }
+
   async listTopics(): Promise<CallTopic[]> {
     return this.topicRepo.find({ order: { createdAt: 'DESC' } });
   }
@@ -614,7 +802,7 @@ export class CallsService {
     try {
       const result = await this.tritechProvider.transcribeAudio(audioPath);
 
-      // Apply dictionary corrections
+      // Apply dictionary corrections (also mutates result.words in-place)
       const corrected = await this.applyDictionaryCorrections(result);
 
       let transcript = await this.transcriptRepo.findOne({ where: { callId } });
@@ -626,6 +814,7 @@ export class CallsService {
           abonentText: corrected.abonentText,
           turns: corrected.turns,
           words: result.words || null,
+          dictionaryApplied: corrected.dictionaryApplied || null,
           language: 'ru',
           provider: 'tritech',
           sentiment: result.sentiment,
@@ -636,16 +825,17 @@ export class CallsService {
         transcript.abonentText = corrected.abonentText;
         transcript.turns = corrected.turns;
         transcript.words = result.words || null;
+        transcript.dictionaryApplied = corrected.dictionaryApplied || null;
         transcript.language = 'ru';
         transcript.provider = 'tritech';
         transcript.sentiment = result.sentiment;
       }
       await this.transcriptRepo.save(transcript);
 
-      // Topic matching on operator text
+      // Topic matching on corrected operator text
       await this.matchRepo.delete({ callId });
       const matchesToSave: Partial<CallTopicMatch>[] = [];
-      const operatorSource = result.operatorText?.trim();
+      const operatorSource = corrected.operatorText?.trim();
       if (operatorSource) {
         const topics = await this.topicRepo.find({ where: { isActive: true } });
         topics.forEach((topic) => {
@@ -942,24 +1132,29 @@ export class CallsService {
             ? this.buildTurnsFromOperatorAbonent(operatorText, abonentText)
             : null;
 
+      // Apply dictionary corrections
+      const corrected = await this.applyDictionaryCorrections({ text, operatorText, abonentText, turns, words: allWords });
+
       let transcript = await this.transcriptRepo.findOne({ where: { callId } });
       if (!transcript) {
         transcript = this.transcriptRepo.create({
           callId,
-          text,
-          operatorText,
-          abonentText,
-          turns,
+          text: corrected.text,
+          operatorText: corrected.operatorText,
+          abonentText: corrected.abonentText,
+          turns: corrected.turns,
           words: allWords,
+          dictionaryApplied: corrected.dictionaryApplied || null,
           language,
           provider: 'aitunnel',
         });
       } else {
-        transcript.text = text;
-        transcript.operatorText = operatorText;
-        transcript.abonentText = abonentText;
-        transcript.turns = turns;
+        transcript.text = corrected.text;
+        transcript.operatorText = corrected.operatorText;
+        transcript.abonentText = corrected.abonentText;
+        transcript.turns = corrected.turns;
         transcript.words = allWords;
+        transcript.dictionaryApplied = corrected.dictionaryApplied || null;
         transcript.language = language;
         transcript.provider = 'aitunnel';
       }
@@ -967,7 +1162,7 @@ export class CallsService {
 
       await this.matchRepo.delete({ callId });
       const matchesToSave: Partial<CallTopicMatch>[] = [];
-      const operatorSource = operatorText?.trim();
+      const operatorSource = corrected.operatorText?.trim();
       if (operatorSource) {
         const topics = await this.topicRepo.find({ where: { isActive: true } });
         topics.forEach((topic) => {
@@ -1030,15 +1225,28 @@ export class CallsService {
     operatorText: string | null;
     abonentText: string | null;
     turns: { speaker: 'operator' | 'abonent'; text: string; start?: number; end?: number }[] | null;
+    words?: { word: string; start: number; end: number; speaker: string }[] | null;
   }) {
     const entries = await this.dictRepo.find({ where: { isActive: true } });
-    if (!entries.length) return result;
+    if (!entries.length) return { ...result, dictionaryApplied: null };
+
+    const appliedMap = new Map<string, { original: string; corrected: string; count: number }>();
 
     const applyReplacements = (text: string | null): string | null => {
       if (!text) return text;
       let corrected = text;
       for (const entry of entries) {
         const regex = new RegExp(entry.originalWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        const matches = corrected.match(regex);
+        if (matches) {
+          const key = entry.originalWord.toLowerCase();
+          const prev = appliedMap.get(key);
+          appliedMap.set(key, {
+            original: entry.originalWord,
+            corrected: entry.correctedWord,
+            count: (prev?.count || 0) + matches.length,
+          });
+        }
         corrected = corrected.replace(regex, entry.correctedWord);
       }
       return corrected;
@@ -1052,11 +1260,62 @@ export class CallsService {
       text: applyReplacements(t.text) || t.text,
     })) || null;
 
+    // Also correct words array (word-level tokens with timestamps)
+    const correctedWords = result.words;
+    if (correctedWords?.length) {
+      for (const entry of entries) {
+        const originalParts = entry.originalWord.toLowerCase().split(/\s+/).filter(Boolean);
+        if (!originalParts.length) continue;
+        const replacementParts = entry.correctedWord.split(/\s+/).filter(Boolean);
+
+        for (let i = 0; i <= correctedWords.length - originalParts.length; i++) {
+          let matched = true;
+          for (let j = 0; j < originalParts.length; j++) {
+            const clean = correctedWords[i + j].word.toLowerCase().replace(/[.,!?;:"""''()]/g, '');
+            if (clean !== originalParts[j]) { matched = false; break; }
+          }
+          if (matched) {
+            // Replace word tokens: distribute replacement across matched tokens
+            if (replacementParts.length === 1) {
+              // Preserve punctuation from original word
+              const orig = correctedWords[i].word;
+              const leadPunct = orig.match(/^[.,!?;:"""''()]+/)?.[0] || '';
+              const trailPunct = orig.match(/[.,!?;:"""''()]+$/)?.[0] || '';
+              correctedWords[i].word = leadPunct + replacementParts[0] + trailPunct;
+              // Remove extra matched tokens
+              for (let j = 1; j < originalParts.length; j++) {
+                correctedWords.splice(i + 1, 1);
+              }
+            } else {
+              // Multi-word replacement: replace first, update rest or add
+              for (let j = 0; j < Math.max(originalParts.length, replacementParts.length); j++) {
+                if (j < originalParts.length && j < replacementParts.length) {
+                  correctedWords[i + j].word = replacementParts[j];
+                } else if (j >= originalParts.length) {
+                  // Insert additional word tokens
+                  correctedWords.splice(i + j, 0, { ...correctedWords[i + j - 1], word: replacementParts[j] });
+                } else {
+                  // Remove extra original tokens
+                  correctedWords.splice(i + j, 1);
+                  j--;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    const dictionaryApplied = appliedMap.size > 0
+      ? [...appliedMap.values()]
+      : null;
+
     return {
       text: correctedText,
       operatorText: correctedOperator,
       abonentText: correctedAbonent,
       turns: correctedTurns,
+      dictionaryApplied,
     };
   }
 

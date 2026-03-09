@@ -270,6 +270,53 @@ export default function Calls() {
   const [uploadDurationSeconds, setUploadDurationSeconds] = useState('');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
 
+  const [fillerWords, setFillerWords] = useState<string[]>([]);
+  const [negativeWords, setNegativeWords] = useState<string[]>([]);
+
+  // Precompute which calls have unwanted words in operator speech
+  const unwantedStatus = useMemo(() => {
+    const allWords = [...fillerWords, ...negativeWords];
+    if (!allWords.length) return new Map<string, 'negative' | 'filler'>();
+    const result = new Map<string, 'negative' | 'filler'>();
+    const clean = (s: string) => s.toLowerCase().replace(/[.,!?;:"""''()]/g, '');
+    for (const call of calls) {
+      const opText = call.transcript?.operatorText;
+      if (!opText) continue;
+      const words = opText.split(/\s+/).map(clean);
+      let hasNeg = false;
+      let hasFiller = false;
+      for (const phrase of negativeWords) {
+        const parts = phrase.toLowerCase().split(/\s+/).filter(Boolean);
+        if (!parts.length) continue;
+        for (let i = 0; i <= words.length - parts.length; i++) {
+          let matched = true;
+          for (let j = 0; j < parts.length; j++) {
+            if (words[i + j] !== parts[j]) { matched = false; break; }
+          }
+          if (matched) { hasNeg = true; break; }
+        }
+        if (hasNeg) break;
+      }
+      if (!hasNeg) {
+        for (const phrase of fillerWords) {
+          const parts = phrase.toLowerCase().split(/\s+/).filter(Boolean);
+          if (!parts.length) continue;
+          for (let i = 0; i <= words.length - parts.length; i++) {
+            let matched = true;
+            for (let j = 0; j < parts.length; j++) {
+              if (words[i + j] !== parts[j]) { matched = false; break; }
+            }
+            if (matched) { hasFiller = true; break; }
+          }
+          if (hasFiller) break;
+        }
+      }
+      if (hasNeg) result.set(call.id, 'negative');
+      else if (hasFiller) result.set(call.id, 'filler');
+    }
+    return result;
+  }, [calls, fillerWords, negativeWords]);
+
   const activeTopics = useMemo(() => topics.filter((t) => t.isActive), [topics]);
   const hasActiveFilters = filterFrom || filterTo || filterEmployees.length > 0 || filterTopics.length > 0;
 
@@ -293,14 +340,17 @@ export default function Calls() {
     setError('');
     try {
       const params = paramsOverride ?? buildParams();
-      const [callsRes, statsRes, topicsRes] = await Promise.all([
+      const [callsRes, statsRes, topicsRes, uwRes] = await Promise.all([
         api.get<CallRow[]>('/calls', { params }),
         api.get<CallStats>('/calls/stats', { params }),
         api.get<CallTopic[]>('/calls/topics'),
+        api.get<{ fillerWords: string[]; negativeWords: string[] }>('/calls/unwanted-words'),
       ]);
       setCalls(callsRes.data);
       setStats(statsRes.data);
       setTopics(topicsRes.data);
+      setFillerWords(uwRes.data.fillerWords);
+      setNegativeWords(uwRes.data.negativeWords);
     } catch {
       setError('Не удалось загрузить данные по звонкам');
     } finally {
@@ -509,6 +559,7 @@ export default function Calls() {
                     { to: '/calls/settings/provider', label: 'Провайдер' },
                     { to: '/calls/settings/dictionary', label: 'Словарь' },
                     { to: '/calls/settings/topics', label: 'Тематики' },
+                    { to: '/calls/settings/unwanted-words', label: 'Нежелательные слова' },
                     { to: '/calls/settings/favorites', label: 'Избранное' },
                     { to: '/calls/settings/recording', label: 'Режим записи' },
                     { to: '/calls/settings/reports', label: 'Отчеты' },
@@ -739,6 +790,7 @@ export default function Calls() {
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Клиент</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Длительность</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Тематики</th>
+                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider" title="Нежелательные слова">НС</th>
                 <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Эмоции</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Статус</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Действия</th>
@@ -788,6 +840,18 @@ export default function Calls() {
                               </span>
                             ))}
                           </div>
+                        ) : (
+                          <span className="text-gray-300">&mdash;</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {unwantedStatus.has(call.id) ? (
+                          <span
+                            className={`inline-block w-2.5 h-2.5 rounded-full ${
+                              unwantedStatus.get(call.id) === 'negative' ? 'bg-red-500' : 'bg-orange-400'
+                            }`}
+                            title={unwantedStatus.get(call.id) === 'negative' ? 'Негативные слова' : 'Слова-паразиты'}
+                          />
                         ) : (
                           <span className="text-gray-300">&mdash;</span>
                         )}

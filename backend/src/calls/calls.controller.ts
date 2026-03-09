@@ -71,6 +71,32 @@ export class CallsController {
     });
   }
 
+  @Get('reports/analysis')
+  @Permissions('calls')
+  reportAnalysis(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('topics') topics?: string,
+  ) {
+    return this.calls.getReportAnalysis({
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+      topics: this.parseList(topics),
+    });
+  }
+
+  @Get('unwanted-words')
+  @Permissions('calls_settings')
+  getUnwantedWords() {
+    return this.calls.getUnwantedWords();
+  }
+
+  @Put('unwanted-words')
+  @Permissions('calls_settings')
+  updateUnwantedWords(@Body() body: { fillerWords?: string[]; negativeWords?: string[] }) {
+    return this.calls.updateUnwantedWords(body);
+  }
+
   @Get('topics')
   listTopics() {
     return this.calls.listTopics();

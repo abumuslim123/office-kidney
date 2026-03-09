@@ -39,6 +39,9 @@ export class CallTranscript {
   @Column({ type: 'varchar', length: 20, nullable: true })
   language: string | null;
 
+  @Column({ type: 'jsonb', nullable: true })
+  dictionaryApplied: { original: string; corrected: string; count: number }[] | null;
+
   @Column({ type: 'varchar', length: 50, default: 'polza' })
   provider: string;
 

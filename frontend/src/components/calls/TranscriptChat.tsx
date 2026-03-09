@@ -23,6 +23,8 @@ type TranscriptChatProps = {
   onSeek: (time: number) => void;
   operatorName?: string;
   abonentName?: string;
+  fillerWords?: string[];
+  negativeWords?: string[];
 };
 
 function escapeRegExp(s: string): string {
@@ -31,31 +33,48 @@ function escapeRegExp(s: string): string {
 
 const clean = (s: string) => s.toLowerCase().replace(/[.,!?;:"""''()]/g, '');
 
+type HighlightColor = 'green' | 'yellow' | 'orange' | 'red';
+
 /** Build a set of word indices that match keywords (supports multi-word phrases) */
 function buildKeywordHighlightMap(
   words: { word: string }[],
   keywords: string[],
   highlightedKeywords: string[],
-): Map<number, 'green' | 'yellow'> {
-  const result = new Map<number, 'green' | 'yellow'>();
-  const allKws = [...new Set([...highlightedKeywords, ...keywords])];
+  fillerWords: string[] = [],
+  negativeWords: string[] = [],
+): Map<number, HighlightColor> {
+  const result = new Map<number, HighlightColor>();
   const highlightedSet = new Set(highlightedKeywords.map((k) => k.toLowerCase()));
 
-  for (const kw of allKws) {
-    const parts = kw.toLowerCase().split(/\s+/).filter(Boolean);
-    for (let i = 0; i <= words.length - parts.length; i++) {
-      let matched = true;
-      for (let j = 0; j < parts.length; j++) {
-        if (!clean(words[i + j].word).includes(parts[j])) {
-          matched = false;
-          break;
-        }
-      }
-      if (matched) {
-        const color = highlightedSet.has(kw.toLowerCase()) ? 'green' : 'yellow';
+  // Priority: green (active topic) > yellow (topic) > red (negative) > orange (filler)
+  const groups: { words: string[]; color: HighlightColor }[] = [
+    { words: [...new Set([...highlightedKeywords, ...keywords])], color: 'yellow' },
+    { words: negativeWords, color: 'red' },
+    { words: fillerWords, color: 'orange' },
+  ];
+
+  for (const group of groups) {
+    for (const kw of group.words) {
+      const parts = kw.toLowerCase().split(/\s+/).filter(Boolean);
+      if (!parts.length) continue;
+      for (let i = 0; i <= words.length - parts.length; i++) {
+        let matched = true;
         for (let j = 0; j < parts.length; j++) {
-          if (!result.has(i + j) || color === 'green') {
-            result.set(i + j, color);
+          if (clean(words[i + j].word) !== parts[j]) {
+            matched = false;
+            break;
+          }
+        }
+        if (matched) {
+          let color = group.color;
+          // Active topic keywords get green
+          if (color === 'yellow' && highlightedSet.has(kw.toLowerCase())) color = 'green';
+          for (let j = 0; j < parts.length; j++) {
+            const existing = result.get(i + j);
+            // Higher priority colors don't get overwritten
+            if (!existing || (color === 'green' && existing !== 'green')) {
+              result.set(i + j, color);
+            }
           }
         }
       }
@@ -64,9 +83,11 @@ function buildKeywordHighlightMap(
   return result;
 }
 
-function getHighlightClass(color: 'green' | 'yellow' | undefined): string {
+function getHighlightClass(color: HighlightColor | undefined): string {
   if (color === 'green') return 'bg-green-200 rounded-sm px-0.5';
   if (color === 'yellow') return 'bg-yellow-100 rounded-sm px-0.5';
+  if (color === 'orange') return 'bg-orange-100 text-orange-800 rounded-sm px-0.5';
+  if (color === 'red') return 'bg-red-100 text-red-800 rounded-sm px-0.5';
   return '';
 }
 
@@ -84,6 +105,7 @@ function mapWordsToTurns(turns: Turn[], words: TimedWord[]): (TimedWord[] | null
 export default function TranscriptChat({
   turns, words, currentTime, keywords, highlightedKeywords = [], onSeek,
   operatorName = 'Оператор', abonentName = 'Собеседник',
+  fillerWords = [], negativeWords = [],
 }: TranscriptChatProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const activeHighlightRef = useRef<HTMLSpanElement | null>(null);
@@ -167,7 +189,7 @@ export default function TranscriptChat({
           const wordsForTurn = turnWords?.[idx];
           const isActive = idx === activeTurnIdx;
           const highlightMap = wordsForTurn && isOperator(turn.speaker)
-            ? buildKeywordHighlightMap(wordsForTurn, keywords, highlightedKeywords)
+            ? buildKeywordHighlightMap(wordsForTurn, keywords, highlightedKeywords, fillerWords, negativeWords)
             : null;
 
           return (
@@ -228,6 +250,18 @@ export default function TranscriptChat({
                             html = html.replace(
                               new RegExp(`(?!<[^>]*)(${remaining.map(escapeRegExp).join('|')})(?![^<]*>)`, 'gi'),
                               '<mark class="bg-yellow-100 rounded-sm px-0.5">$1</mark>',
+                            );
+                          }
+                          if (negativeWords.length) {
+                            html = html.replace(
+                              new RegExp(`(?!<[^>]*)(${negativeWords.map(escapeRegExp).join('|')})(?![^<]*>)`, 'gi'),
+                              '<mark class="bg-red-100 text-red-800 rounded-sm px-0.5">$1</mark>',
+                            );
+                          }
+                          if (fillerWords.length) {
+                            html = html.replace(
+                              new RegExp(`(?!<[^>]*)(${fillerWords.map(escapeRegExp).join('|')})(?![^<]*>)`, 'gi'),
+                              '<mark class="bg-orange-100 text-orange-800 rounded-sm px-0.5">$1</mark>',
                             );
                           }
                         }

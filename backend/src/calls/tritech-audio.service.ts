@@ -191,11 +191,11 @@ export class TritechAudioService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async pollTaskResult(taskId: string, maxAttempts = 60, intervalMs = 3000): Promise<any> {
     const token = await this.getToken();
-    const url = `${ASR_TASKS_URL}/${taskId}?result=true&output_format=timestamps`;
+    const tsUrl = `${ASR_TASKS_URL}/${taskId}?result=true&output_format=timestamps`;
 
     for (let i = 0; i < maxAttempts; i++) {
       try {
-        const res = await axios.get(url, {
+        const res = await axios.get(tsUrl, {
           headers: { Authorization: `Bearer ${token}` },
           timeout: 30_000,
         });
@@ -203,6 +203,19 @@ export class TritechAudioService {
         const status = res.data?.status;
         if (status === 'complete') {
           this.logger.log(`3iTech task ${taskId} complete after ${i + 1} poll(s)`);
+
+          // Also fetch text format (with punctuation)
+          try {
+            const textUrl = `${ASR_TASKS_URL}/${taskId}?result=true&output_format=text`;
+            const textRes = await axios.get(textUrl, {
+              headers: { Authorization: `Bearer ${token}` },
+              timeout: 30_000,
+            });
+            res.data._textResult = textRes.data?.result;
+          } catch {
+            this.logger.warn('3iTech: не удалось получить текстовый формат для пунктуации');
+          }
+
           return res.data;
         }
         if (status === 'error') {
@@ -354,6 +367,15 @@ export class TritechAudioService {
       if (!words.length) words = null;
     }
 
+    // Merge punctuation from text format into word tokens
+    const textResult = taskData._textResult;
+    if (words && textResult) {
+      const punctuatedText = this.extractPunctuatedText(textResult);
+      if (punctuatedText) {
+        this.applyPunctuation(words, punctuatedText);
+      }
+    }
+
     // Merge consecutive turns from the same speaker
     const merged: typeof turns = [];
     for (const turn of turns) {
@@ -363,6 +385,18 @@ export class TritechAudioService {
         if (turn.end !== undefined) last.end = turn.end;
       } else {
         merged.push({ ...turn });
+      }
+    }
+
+    // Rebuild turn text from punctuated words (if available)
+    if (words && textResult) {
+      for (const turn of merged) {
+        const turnWords = words.filter(
+          (w) => w.speaker === turn.speaker && w.start >= (turn.start || 0) - 0.05 && w.start < (turn.end || Infinity) + 0.05,
+        );
+        if (turnWords.length > 0) {
+          turn.text = turnWords.map((w) => w.word).join(' ');
+        }
       }
     }
 
@@ -444,6 +478,57 @@ export class TritechAudioService {
       silenceDuration,
       sentiment,
     };
+  }
+
+  /**
+   * Extract full punctuated text from the text-format result.
+   * The text result can be a string, array of strings, or array of objects with text/channel.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private extractPunctuatedText(textResult: any): string | null {
+    if (typeof textResult === 'string') return textResult;
+    if (Array.isArray(textResult)) {
+      // Array of objects with text field, or array of strings
+      const parts = textResult.map((item: any) => {
+        if (typeof item === 'string') return item;
+        if (item?.text) return String(item.text);
+        if (item?.word) return String(item.word);
+        return '';
+      }).filter(Boolean);
+      return parts.join(' ') || null;
+    }
+    if (textResult?.text) return String(textResult.text);
+    return null;
+  }
+
+  /**
+   * Align punctuated text with word tokens and apply punctuation marks.
+   * Uses a simple sequential alignment: strip punctuation from text words,
+   * match to raw word tokens, then copy trailing punctuation.
+   */
+  private applyPunctuation(
+    words: { word: string; start: number; end: number; speaker: string }[],
+    punctuatedText: string,
+  ): void {
+    // Split punctuated text into tokens (keeping punctuation attached)
+    const textTokens = punctuatedText.split(/\s+/).filter(Boolean);
+    const strip = (s: string) => s.toLowerCase().replace(/[.,!?;:…—–\-"""''«»()\[\]]/g, '');
+
+    let ti = 0; // text token index
+    for (let wi = 0; wi < words.length && ti < textTokens.length; wi++) {
+      const rawClean = strip(words[wi].word);
+      if (!rawClean) continue;
+
+      // Try to find matching text token (allow small skip for misalignment)
+      for (let look = 0; look < 3 && ti + look < textTokens.length; look++) {
+        const ttClean = strip(textTokens[ti + look]);
+        if (ttClean === rawClean || ttClean.includes(rawClean) || rawClean.includes(ttClean)) {
+          words[wi].word = textTokens[ti + look];
+          ti = ti + look + 1;
+          break;
+        }
+      }
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
