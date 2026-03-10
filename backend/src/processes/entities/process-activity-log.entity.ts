@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -18,6 +19,7 @@ export type ProcessActivityActionType =
   | 'version_created';
 
 @Entity('process_activity_log')
+@Index('IDX_process_activity_log_process_date', ['processId', 'createdAt'])
 export class ProcessActivityLog {
   @PrimaryGeneratedColumn('uuid')
   id: string;
