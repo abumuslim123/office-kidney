@@ -32,6 +32,8 @@ import { UpdateProcessDepartmentDto } from './dto/update-process-department.dto'
 import { UpdateProcessDto } from './dto/update-process.dto';
 import { UpdateVersionCorrectionsDto } from './dto/update-version-corrections.dto';
 import { SuggestChecklistsDto } from './dto/suggest-checklists.dto';
+import { MoveProcessesDto } from './dto/move-processes.dto';
+import { UpdatePolzaSettingsDto } from './dto/update-polza-settings.dto';
 import { ProcessesService } from './processes.service';
 
 @Controller('processes')
@@ -118,9 +120,9 @@ export class ProcessesController {
   @Permissions('processes_edit')
   async moveProcesses(
     @Param('id') id: string,
-    @Body() body: { targetDepartmentId: string },
+    @Body() dto: MoveProcessesDto,
   ) {
-    await this.processes.moveProcesses(id, body.targetDepartmentId);
+    await this.processes.moveProcesses(id, dto.targetDepartmentId);
     return { success: true };
   }
 
@@ -144,9 +146,9 @@ export class ProcessesController {
   @Put('settings')
   @Permissions('processes_edit')
   updatePolzaSettings(
-    @Body() body: { apiKey?: string; baseUrl?: string; model?: string },
+    @Body() dto: UpdatePolzaSettingsDto,
   ) {
-    return this.processes.updatePolzaSettings(body);
+    return this.processes.updatePolzaSettings(dto);
   }
 
   @Get(':id')

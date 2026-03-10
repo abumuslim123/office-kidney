@@ -2,13 +2,14 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { In, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { CreateProcessDepartmentDto } from './dto/create-process-department.dto';
 import { CreateProcessDto } from './dto/create-process.dto';
@@ -54,6 +55,8 @@ const TAGGED_NEW = 'taggedNew';
 
 @Injectable()
 export class ProcessesService {
+  private readonly logger = new Logger(ProcessesService.name);
+
   constructor(
     @InjectRepository(ProcessDepartment)
     private departmentsRepo: Repository<ProcessDepartment>,
@@ -75,6 +78,7 @@ export class ProcessesService {
     private settingsRepo: Repository<AppSetting>,
     private pushNotifications: PushNotificationsService,
     private checklistAi: ChecklistAiService,
+    private dataSource: DataSource,
   ) {}
 
   async getDepartmentTree(currentUser: User) {
@@ -355,24 +359,30 @@ export class ProcessesService {
   async createProcess(dto: CreateProcessDto, currentUser: User) {
     await this.ensureDepartment(dto.departmentId);
     const doc = this.normalizeDoc(dto.descriptionDoc);
-    const process = this.processesRepo.create({
-      departmentId: dto.departmentId,
-      title: dto.title.trim(),
-      currentDescriptionDoc: doc,
-      createdById: currentUser.id,
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const process = manager.getRepository(Process).create({
+        departmentId: dto.departmentId,
+        title: dto.title.trim(),
+        currentDescriptionDoc: doc,
+        createdById: currentUser.id,
+      });
+      const savedProcess = await manager.getRepository(Process).save(process);
+      await manager.getRepository(ProcessVersion).save(
+        manager.getRepository(ProcessVersion).create({
+          processId: savedProcess.id,
+          version: 1,
+          descriptionDoc: doc,
+          diffData: { changes: [] },
+          diffDataCorrections: [],
+          changedById: currentUser.id,
+        }),
+      );
+      await manager.getRepository(ProcessReadState).upsert(
+        { userId: currentUser.id, processId: savedProcess.id, lastReadVersion: 1 },
+        ['userId', 'processId'],
+      );
+      return savedProcess;
     });
-    const saved = await this.processesRepo.save(process);
-    await this.versionsRepo.save(
-      this.versionsRepo.create({
-        processId: saved.id,
-        version: 1,
-        descriptionDoc: doc,
-        diffData: { changes: [] },
-        diffDataCorrections: [],
-        changedById: currentUser.id,
-      }),
-    );
-    await this.upsertReadState(currentUser.id, saved.id, 1);
     return this.findProcessById(saved.id);
   }
 
@@ -504,21 +514,27 @@ export class ProcessesService {
       };
     }
 
-    const newVersion = await this.versionsRepo.save(
-      this.versionsRepo.create({
-        processId: process.id,
-        version: nextVersion,
-        descriptionDoc: nextDoc,
-        diffData,
-        diffDataCorrections: [],
-        changedById: currentUser.id,
-        changeReason: isIteration ? changeReason : null,
-        checklist: checklistPayload,
-      }),
-    );
-    process.currentDescriptionDoc = nextDoc;
-    await this.processesRepo.save(process);
-    await this.upsertReadState(currentUser.id, process.id, nextVersion);
+    const newVersion = await this.dataSource.transaction(async (manager) => {
+      const version = await manager.getRepository(ProcessVersion).save(
+        manager.getRepository(ProcessVersion).create({
+          processId: process.id,
+          version: nextVersion,
+          descriptionDoc: nextDoc,
+          diffData,
+          diffDataCorrections: [],
+          changedById: currentUser.id,
+          changeReason: isIteration ? changeReason : null,
+          checklist: checklistPayload,
+        }),
+      );
+      process.currentDescriptionDoc = nextDoc;
+      await manager.getRepository(Process).save(process);
+      await manager.getRepository(ProcessReadState).upsert(
+        { userId: currentUser.id, processId: process.id, lastReadVersion: nextVersion },
+        ['userId', 'processId'],
+      );
+      return version;
+    });
     if (isIteration) {
       await this.logProcessActivity({
         processId: process.id,
@@ -737,19 +753,24 @@ export class ProcessesService {
       flattenedDoc,
       currentUser,
     );
-    process.currentDescriptionDoc = flattenedDoc;
-    await this.processesRepo.save(process);
-    await this.versionsRepo.save(
-      this.versionsRepo.create({
-        processId,
-        version: nextVersionNo,
-        descriptionDoc: flattenedDoc,
-        diffData,
-        diffDataCorrections: [],
-        changedById: currentUser.id,
-      }),
-    );
-    await this.upsertReadState(currentUser.id, processId, nextVersionNo);
+    await this.dataSource.transaction(async (manager) => {
+      process.currentDescriptionDoc = flattenedDoc;
+      await manager.getRepository(Process).save(process);
+      await manager.getRepository(ProcessVersion).save(
+        manager.getRepository(ProcessVersion).create({
+          processId,
+          version: nextVersionNo,
+          descriptionDoc: flattenedDoc,
+          diffData,
+          diffDataCorrections: [],
+          changedById: currentUser.id,
+        }),
+      );
+      await manager.getRepository(ProcessReadState).upsert(
+        { userId: currentUser.id, processId, lastReadVersion: nextVersionNo },
+        ['userId', 'processId'],
+      );
+    });
     return this.findProcessById(processId);
   }
 
@@ -854,12 +875,11 @@ export class ProcessesService {
     const prevBlocks = this.extractBlockTexts({ doc: prevPm });
     const nextBlocks = this.extractBlockTexts({ doc: nextPm });
 
-    console.log('[DIFF] prevBlocks:', prevBlocks.length, prevBlocks.map((b) => b.slice(0, 60)));
-    console.log('[DIFF] nextBlocks:', nextBlocks.length, nextBlocks.map((b) => b.slice(0, 60)));
+    this.logger.debug(`[DIFF] prevBlocks: ${prevBlocks.length}, nextBlocks: ${nextBlocks.length}`);
 
     const blockChanges = this.diffBlocks(prevBlocks, nextBlocks);
 
-    console.log('[DIFF] changes:', blockChanges.length, blockChanges.map((c) => `${c.blockIndex}:${c.changeType}`));
+    this.logger.debug(`[DIFF] changes: ${blockChanges.length}`);
 
     const userName =
       currentUser.displayName || currentUser.login || 'Пользователь';

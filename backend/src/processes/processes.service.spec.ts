@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ProcessesService } from './processes.service';
 import { Process } from './entities/process.entity';
@@ -48,6 +49,7 @@ describe('ProcessesService', () => {
         { provide: getRepositoryToken(AppSetting), useValue: createMockRepository() },
         { provide: PushNotificationsService, useValue: pushNotifications },
         { provide: ChecklistAiService, useValue: { suggestChecklists: jest.fn() } },
+        { provide: DataSource, useValue: { transaction: jest.fn((cb: any) => cb({ getRepository: () => createMockRepository() })) } },
       ],
     }).compile();
 
