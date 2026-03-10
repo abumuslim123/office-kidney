@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   OneToMany,
@@ -14,6 +15,7 @@ import { ProcessAttachment } from './process-attachment.entity';
 import { ProcessVersion } from './process-version.entity';
 
 @Entity('processes')
+@Index('IDX_processes_department', ['departmentId'])
 export class Process {
   @PrimaryGeneratedColumn('uuid')
   id: string;
