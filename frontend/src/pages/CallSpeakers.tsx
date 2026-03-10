@@ -88,7 +88,7 @@ export default function CallSpeakers() {
     <div>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-semibold text-gray-900">Модели дикторов (3iTech)</h2>
-        <Link to="/calls/settings" className="text-sm text-accent hover:underline">
+        <Link to="/settings/kcalls" className="text-sm text-accent hover:underline">
           Назад к настройкам
         </Link>
       </div>
