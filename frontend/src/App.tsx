@@ -23,7 +23,6 @@ import CallDetail from './pages/CallDetail';
 import CallTopics from './pages/CallTopics';
 import CallDictionary from './pages/CallDictionary';
 import CallSpeakers from './pages/CallSpeakers';
-import CallsSettings from './pages/CallsSettings';
 import CallsSettingsLayout from './pages/CallsSettingsLayout';
 import CallsFavorites from './pages/CallsFavorites';
 import CallsRecording from './pages/CallsRecording';
@@ -31,7 +30,11 @@ import CallsReports from './pages/CallsReports';
 import CallsReportAnalysis from './pages/CallsReportAnalysis';
 import CallsUnwantedWords from './pages/CallsUnwantedWords';
 import Processes from './pages/Processes';
-import Settings from './pages/Settings';
+import SettingsLayout from './pages/SettingsLayout';
+import SettingsBackup from './pages/SettingsBackup';
+import SettingsBitrix24 from './pages/SettingsBitrix24';
+import SettingsProcesses from './pages/SettingsProcesses';
+import SettingsKCalls from './pages/SettingsKCalls';
 import ResumeLayout from './components/resume/ResumeLayout';
 import ResumeUploadPage from './pages/ResumeUploadPage';
 import ResumeCandidatesPage from './pages/ResumeCandidatesPage';
@@ -88,11 +91,15 @@ function App() {
         <Route path="calls" element={<ProtectedRoute permissions={['calls']}><Calls /></ProtectedRoute>} />
         <Route path="calls/:id" element={<ProtectedRoute permissions={['calls']}><CallDetail /></ProtectedRoute>} />
         <Route path="processes" element={<ProtectedRoute permissions={['processes_view']}><Processes /></ProtectedRoute>} />
-        <Route path="settings" element={<ProtectedRoute permissions={['processes_edit']}><Settings /></ProtectedRoute>} />
-        <Route path="calls/speakers" element={<ProtectedRoute permissions={['calls_settings']}><CallSpeakers /></ProtectedRoute>} />
+        <Route path="settings" element={<ProtectedRoute permissions={['processes_edit']}><SettingsLayout /></ProtectedRoute>}>
+          <Route index element={<SettingsBackup />} />
+          <Route path="bitrix24" element={<SettingsBitrix24 />} />
+          <Route path="processes" element={<SettingsProcesses />} />
+          <Route path="kcalls" element={<SettingsKCalls />} />
+          <Route path="kcalls/speakers" element={<CallSpeakers />} />
+        </Route>
         <Route path="calls/settings" element={<ProtectedRoute permissions={['calls_settings']}><CallsSettingsLayout /></ProtectedRoute>}>
-          <Route index element={<Navigate to="provider" replace />} />
-          <Route path="provider" element={<CallsSettings />} />
+          <Route index element={<Navigate to="dictionary" replace />} />
           <Route path="dictionary" element={<CallDictionary />} />
           <Route path="topics" element={<CallTopics />} />
           <Route path="unwanted-words" element={<CallsUnwantedWords />} />
