@@ -2,6 +2,12 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class FixEmbeddingDimension1741400000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
+    // Пропускаем если pgvector не установлен (локальная разработка без pgvector)
+    const [{ exists }] = await queryRunner.query(
+      `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') AS exists`,
+    );
+    if (!exists) return;
+
     // Удаляем HNSW-индекс (нельзя менять тип с индексом)
     await queryRunner.query(
       `DROP INDEX IF EXISTS "IDX_resume_candidates_embedding"`,
@@ -24,6 +30,11 @@ export class FixEmbeddingDimension1741400000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    const [{ exists }] = await queryRunner.query(
+      `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') AS exists`,
+    );
+    if (!exists) return;
+
     await queryRunner.query(
       `DROP INDEX IF EXISTS "IDX_resume_candidates_embedding"`,
     );
