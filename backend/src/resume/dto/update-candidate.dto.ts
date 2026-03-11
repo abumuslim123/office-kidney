@@ -14,6 +14,7 @@ import {
   ResumeCandidatePriority,
   ResumeCandidateGender,
   ResumeCandidateDoctorType,
+  ResumeSalaryType,
 } from '../entities/resume.enums';
 
 export class UpdateCandidateDto {
@@ -161,4 +162,12 @@ export class UpdateCandidateDto {
   @IsEnum(ResumeCandidateDoctorType, { each: true })
   @IsOptional()
   doctorTypes?: ResumeCandidateDoctorType[];
+
+  @IsNumber()
+  @IsOptional()
+  desiredSalary?: number;
+
+  @IsEnum(ResumeSalaryType)
+  @IsOptional()
+  desiredSalaryType?: ResumeSalaryType;
 }

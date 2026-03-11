@@ -6,6 +6,8 @@ import ResumeDropzone from '../components/resume/ResumeDropzone';
 import ResumeTextPasteArea from '../components/resume/ResumeTextPasteArea';
 import ResumeUrlInput from '../components/resume/ResumeUrlInput';
 import ResumeFileList from '../components/resume/ResumeFileList';
+import ResumeUploadQueue from '../components/resume/ResumeUploadQueue';
+import { useUploadQueue } from '../hooks/useUploadQueue';
 
 export default function ResumeUploadPage() {
   const [recent, setRecent] = useState<ResumeCandidate[]>([]);
@@ -25,6 +27,8 @@ export default function ResumeUploadPage() {
       setLoading(false);
     }
   }, []);
+
+  const queue = useUploadQueue(loadRecent);
 
   useEffect(() => {
     loadRecent();
@@ -73,8 +77,20 @@ export default function ResumeUploadPage() {
       <div className="grid lg:grid-cols-2 gap-6">
         <div className="space-y-4">
           <div className="bg-white border border-gray-200 rounded-xl p-4">
-            <h3 className="text-sm font-medium text-gray-900 mb-3">Загрузить файл</h3>
-            <ResumeDropzone onUploaded={loadRecent} />
+            <h3 className="text-sm font-medium text-gray-900 mb-3">Загрузить файлы</h3>
+            <ResumeDropzone onFilesSelected={queue.addFiles} />
+            {queue.hasItems && (
+              <div className="mt-3">
+                <ResumeUploadQueue
+                  items={queue.items}
+                  uploadedCount={queue.uploadedCount}
+                  totalCount={queue.totalCount}
+                  onRetry={queue.retryItem}
+                  onRemove={queue.removeItem}
+                  onClearCompleted={queue.clearCompleted}
+                />
+              </div>
+            )}
           </div>
 
           <div className="bg-white border border-gray-200 rounded-xl p-4">

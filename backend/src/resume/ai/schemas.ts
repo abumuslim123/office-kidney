@@ -63,6 +63,8 @@ export const CvParsedOutputSchema = z.object({
   publications: z.string().nullable().catch(null).describe('List of publications, as free text'),
   languages: z.array(z.string()).catch([]).describe('Languages spoken'),
   additionalSkills: z.string().nullable().catch(null).describe('Additional skills or competencies'),
+  desiredSalary: z.number().nullable().catch(null).describe('Desired salary: fixed amount in rubles per month or percentage of patient visit cost'),
+  desiredSalaryType: z.enum(['FIXED_RUB', 'PERCENT_OF_VISIT']).nullable().catch(null).describe('Salary type: FIXED_RUB for fixed monthly salary, PERCENT_OF_VISIT for percentage of visit cost'),
   workHistory: z.array(WorkHistorySchema).catch([]).describe('Complete work history'),
   education: z.array(EducationSchema).catch([]).describe('All education entries'),
   cmeCourses: z.array(CmeCourseSchema).catch([]).describe('Continuing medical education courses'),

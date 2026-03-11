@@ -33,6 +33,8 @@ import { ResumeCmeCourse } from './entities/resume-cme-course.entity';
 import { ResumeCandidateNote } from './entities/resume-candidate-note.entity';
 import { ResumeCandidateTag } from './entities/resume-candidate-tag.entity';
 import { ResumeTelegramChat } from './entities/resume-telegram-chat.entity';
+import { ResumeLead } from './entities/resume-lead.entity';
+import { ResumeLeadTag } from './entities/resume-lead-tag.entity';
 import {
   ResumeProcessingStatus,
   ResumeQualificationCategory,
@@ -40,6 +42,8 @@ import {
   ResumeCandidatePriority,
   ResumeCandidateGender,
   ResumeCandidateDoctorType,
+  ResumeLeadStatus,
+  ResumeSalaryType,
 } from './entities/resume.enums';
 import { ResumeSpecialization } from './entities/resume-specialization.entity';
 import { ResumeDuplicateDetectionService, type DuplicateCheckResult } from './resume-duplicate-detection.service';
@@ -47,8 +51,8 @@ import { parseCvText, evaluateParsingQuality } from './ai/parse-cv';
 import { buildCvParsingPrompt } from './ai/prompts';
 import type { CvParsedOutput } from './ai/schemas';
 import { ResumeCandidateScore } from './entities/resume-candidate-score.entity';
-import { buildCompactProfile, buildCandidateProfileText, generateEmbedding, generateEmbeddingsBatch, saveEmbedding, expandSearchQuery } from './ai/embedding';
-import { kMeansClustering, suggestK } from './ai/clustering';
+import { buildCompactProfile, buildCandidateProfileText, generateEmbedding, generateEmbeddingsBatch, saveEmbedding, analyzeSearchQuery, validateSqlClause } from './ai/embedding';
+
 import { buildScoringPrompt } from './ai/scoring-prompt';
 import { generateAiScoring } from './ai/score-candidate';
 import { ollama, OLLAMA_MODEL, OLLAMA_FAST_MODEL } from './ai/client';
@@ -58,6 +62,8 @@ import { CreateNoteDto } from './dto/create-note.dto';
 import { CreateTagDto } from './dto/create-tag.dto';
 import { UpdateCandidateDto } from './dto/update-candidate.dto';
 import { PublicApplySubmitDto } from './dto/public-apply-submit.dto';
+import { CreateLeadDto } from './dto/create-lead.dto';
+import { UpdateLeadDto } from './dto/update-lead.dto';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -79,10 +85,14 @@ const QUALIFICATION_CATEGORIES: Record<string, string> = {
 const CANDIDATE_STATUSES: Record<string, string> = {
   NEW: 'Новый',
   REVIEWING: 'На рассмотрении',
-  INVITED: 'Приглашён',
+  INVITED: 'Приглашен на собеседование',
+  ONLINE_INTERVIEW: 'Онлайн собеседование',
+  INTERVIEW: 'Собеседование',
+  TRIAL: 'Пробный приём',
+  INTERNSHIP: 'Стажировка',
   HIRED: 'Принят',
-  RESERVE: 'Кадровый резерв',
   REJECTED: 'Не подходит',
+  RESERVE: 'Кадровый резерв',
 };
 
 const CANDIDATE_PRIORITIES: Record<string, string> = {
@@ -183,6 +193,10 @@ interface BranchDistributionItem {
   NEW: number;
   REVIEWING: number;
   INVITED: number;
+  ONLINE_INTERVIEW: number;
+  INTERVIEW: number;
+  TRIAL: number;
+  INTERNSHIP: number;
   HIRED: number;
   total: number;
 }
@@ -294,6 +308,10 @@ export class ResumeService {
     private specializationRepo: Repository<ResumeSpecialization>,
     @InjectRepository(ResumeCandidateScore)
     private scoreRepo: Repository<ResumeCandidateScore>,
+    @InjectRepository(ResumeLead)
+    private leadRepo: Repository<ResumeLead>,
+    @InjectRepository(ResumeLeadTag)
+    private leadTagRepo: Repository<ResumeLeadTag>,
     private config: ConfigService,
     private duplicateService: ResumeDuplicateDetectionService,
     private dataSource: DataSource,
@@ -778,6 +796,8 @@ export class ResumeService {
         publications: data.publications,
         languages: data.languages,
         additionalSkills: data.additionalSkills,
+        desiredSalary: data.desiredSalary,
+        desiredSalaryType: data.desiredSalaryType as any || null,
       });
 
       // Delete + recreate work history
@@ -930,7 +950,7 @@ export class ResumeService {
       }
     }
 
-    // Search across fullName, email, phone, specialization
+    // Search across fullName, email, phone, specialization, additionalSpecializations
     if (filters.search) {
       qb.andWhere(
         new Brackets((sub) => {
@@ -946,6 +966,9 @@ export class ResumeService {
             })
             .orWhere('c.specialization ILIKE :search', {
               search: `%${filters.search}%`,
+            })
+            .orWhere("array_to_string(c.\"additionalSpecializations\", ',') ILIKE :search", {
+              search: `%${filters.search}%`,
             });
         }),
       );
@@ -956,9 +979,13 @@ export class ResumeService {
     }
 
     if (filters.specialization) {
-      qb.andWhere('c.specialization = :specialization', {
-        specialization: filters.specialization,
-      });
+      qb.andWhere(
+        new Brackets((sub) => {
+          sub
+            .where('c.specialization = :specFilter', { specFilter: filters.specialization })
+            .orWhere(':specFilter = ANY(c."additionalSpecializations")', { specFilter: filters.specialization });
+        }),
+      );
     }
 
     if (filters.qualificationCategory) {
@@ -1159,8 +1186,29 @@ export class ResumeService {
     if (dto.priority !== undefined) updateData.priority = dto.priority;
     if (dto.gender !== undefined) updateData.gender = dto.gender;
     if (dto.doctorTypes !== undefined) updateData.doctorTypes = dto.doctorTypes;
+    if (dto.desiredSalary !== undefined)
+      updateData.desiredSalary = dto.desiredSalary;
+    if (dto.desiredSalaryType !== undefined)
+      updateData.desiredSalaryType = dto.desiredSalaryType;
 
     await this.candidateRepo.update(id, updateData);
+
+    // Инвалидируем эмбеддинг при изменении содержательных полей профиля
+    const embeddingFields = new Set([
+      'fullName', 'city', 'university', 'faculty', 'graduationYear',
+      'internshipPlace', 'internshipSpecialty', 'residencyPlace', 'residencySpecialty',
+      'specialization', 'additionalSpecializations', 'qualificationCategory',
+      'totalExperienceYears', 'specialtyExperienceYears',
+      'nmoPoints', 'publications', 'additionalSkills', 'languages',
+      'accreditationStatus', 'desiredSalary', 'desiredSalaryType',
+    ]);
+    const changedKeys = Object.keys(updateData);
+    if (changedKeys.some(k => embeddingFields.has(k))) {
+      await this.dataSource.query(
+        `UPDATE resume_candidates SET embedding = NULL WHERE id = $1`,
+        [id],
+      );
+    }
 
     return this.candidateRepo.findOneOrFail({ where: { id } });
   }
@@ -1249,9 +1297,18 @@ export class ResumeService {
   //  Embeddings
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Массовая генерация эмбеддингов для кандидатов, у которых embedding IS NULL.
-   */
+  async getEmbeddingsStatus(): Promise<{ total: number; ready: number; pending: number }> {
+    const rows = await this.dataSource.query(
+      `SELECT
+        COUNT(*) FILTER (WHERE priority NOT IN ('DELETED', 'ARCHIVE') AND "processingStatus" = 'COMPLETED') AS total,
+        COUNT(*) FILTER (WHERE priority NOT IN ('DELETED', 'ARCHIVE') AND "processingStatus" = 'COMPLETED' AND embedding IS NOT NULL) AS ready
+      FROM resume_candidates`,
+    );
+    const total = Number(rows[0]?.total || 0);
+    const ready = Number(rows[0]?.ready || 0);
+    return { total, ready, pending: total - ready };
+  }
+
   /**
    * Запускает фоновую генерацию эмбеддингов. Возвращает управление сразу.
    */
@@ -1330,66 +1387,351 @@ export class ResumeService {
   }
 
   /**
-   * Семантический поиск кандидатов через pgvector cosine distance.
+   * Гибридный AI поиск: LLM анализирует запрос → SQL бонус + Embedding ранжирование.
+   * SQL условия от LLM — НЕ фильтры, а бонус к скору. Все кандидаты видны через embedding.
    */
   async semanticSearch(
     query: string,
     limit = 20,
-    threshold = 0.65,
-    filters?: { specialization?: string; branch?: string; status?: string },
+    _threshold = 0.55,
+    filters?: {
+      specialization?: string; branch?: string; status?: string;
+      priority?: string; doctorType?: string; qualificationCategory?: string;
+      city?: string; workCity?: string; educationCity?: string;
+      experienceMin?: number; experienceMax?: number;
+      accreditation?: string; scoreMin?: number;
+    },
   ) {
-    const expandedQuery = await expandSearchQuery(query);
-    this.logger.debug(`Semantic search: "${query}" → "${expandedQuery}"`);
-    const queryEmbedding = await generateEmbedding(expandedQuery);
+    const analysis = await analyzeSearchQuery(query);
+    this.logger.debug(`Search analysis: ${JSON.stringify(analysis)}`);
+
+    // Embedding всегда генерируется (semanticQuery всегда заполнен после analyzeSearchQuery)
+    const queryEmbedding = await generateEmbedding(analysis.semanticQuery);
     const vectorStr = `[${queryEmbedding.join(',')}]`;
 
-    let sql = `
-      SELECT c.id, c."fullName", c.specialization, c."aiScore", c.phone, c.email,
-             c."qualificationCategory", c."totalExperienceYears", c.city, c.status, c.priority,
-             c."processingStatus", c.branches, c."doctorTypes",
-             (c.embedding <=> $1::vector) AS distance
-      FROM resume_candidates c
-      WHERE c.embedding IS NOT NULL
-        AND c.priority NOT IN ('DELETED', 'ARCHIVE')
-    `;
+    const selectFields = `c.id, c."fullName", c.specialization, c."aiScore", c.phone, c.email,
+      c."qualificationCategory", c."totalExperienceYears", c.city, c.status, c.priority,
+      c."processingStatus", c.branches, c."doctorTypes",
+      c."desiredSalary", c."desiredSalaryType"`;
+
     const params: unknown[] = [vectorStr];
     let paramIndex = 2;
 
+    // UI дроп-даун фильтры — жёсткие (пользователь выбрал явно)
+    let uiWhere = '';
     if (filters?.specialization) {
-      sql += ` AND c.specialization = $${paramIndex}`;
+      uiWhere += ` AND (c.specialization = $${paramIndex} OR $${paramIndex} = ANY(c."additionalSpecializations"))`;
       params.push(filters.specialization);
       paramIndex++;
     }
     if (filters?.branch) {
-      sql += ` AND $${paramIndex} = ANY(c.branches)`;
+      uiWhere += ` AND $${paramIndex} = ANY(c.branches)`;
       params.push(filters.branch);
       paramIndex++;
     }
     if (filters?.status) {
-      sql += ` AND c.status = $${paramIndex}`;
+      uiWhere += ` AND c.status = $${paramIndex}`;
       params.push(filters.status);
       paramIndex++;
     }
+    if (filters?.priority) {
+      uiWhere += ` AND c.priority = $${paramIndex}`;
+      params.push(filters.priority);
+      paramIndex++;
+    }
+    if (filters?.doctorType) {
+      uiWhere += ` AND $${paramIndex} = ANY(c."doctorTypes")`;
+      params.push(filters.doctorType);
+      paramIndex++;
+    }
+    if (filters?.qualificationCategory) {
+      uiWhere += ` AND c."qualificationCategory" = $${paramIndex}`;
+      params.push(filters.qualificationCategory);
+      paramIndex++;
+    }
+    if (filters?.city) {
+      uiWhere += ` AND c.city ILIKE $${paramIndex}`;
+      params.push(`%${filters.city}%`);
+      paramIndex++;
+    }
+    if (filters?.workCity) {
+      uiWhere += ` AND EXISTS (SELECT 1 FROM resume_work_history wh WHERE wh."candidateId" = c.id AND wh.city ILIKE $${paramIndex})`;
+      params.push(`%${filters.workCity}%`);
+      paramIndex++;
+    }
+    if (filters?.educationCity) {
+      uiWhere += ` AND EXISTS (SELECT 1 FROM resume_education ed WHERE ed."candidateId" = c.id AND ed.city ILIKE $${paramIndex})`;
+      params.push(`%${filters.educationCity}%`);
+      paramIndex++;
+    }
+    if (filters?.experienceMin !== undefined) {
+      uiWhere += ` AND c."totalExperienceYears" >= $${paramIndex}`;
+      params.push(filters.experienceMin);
+      paramIndex++;
+    }
+    if (filters?.experienceMax !== undefined) {
+      uiWhere += ` AND c."totalExperienceYears" <= $${paramIndex}`;
+      params.push(filters.experienceMax);
+      paramIndex++;
+    }
+    if (filters?.accreditation) {
+      if (filters.accreditation === 'valid') {
+        uiWhere += ` AND c."accreditationStatus" = true`;
+      } else if (filters.accreditation === 'expired') {
+        uiWhere += ` AND c."accreditationStatus" = false`;
+      }
+    }
+    if (filters?.scoreMin !== undefined) {
+      uiWhere += ` AND c."aiScore" >= $${paramIndex}`;
+      params.push(filters.scoreMin);
+      paramIndex++;
+    }
 
-    sql += ` AND (c.embedding <=> $1::vector) < $${paramIndex}`;
-    params.push(threshold);
-    paramIndex++;
+    // LLM SQL условия → CASE WHEN (мягкий бонус, НЕ фильтр)
+    const hasSql = analysis.sqlConditions.length > 0;
+    let sqlCaseExpr = '0';
+    if (hasSql) {
+      const clauses: string[] = [];
+      for (const cond of analysis.sqlConditions) {
+        let clause = cond.clause;
+        for (let i = cond.params.length; i >= 1; i--) {
+          clause = clause.split(`$${i}`).join(`$${paramIndex + i - 1}`);
+        }
+        clauses.push(`(${clause})`);
+        params.push(...cond.params);
+        paramIndex += cond.params.length;
+      }
+      sqlCaseExpr = `CASE WHEN ${clauses.join(' AND ')} THEN 1 ELSE 0 END`;
+    }
 
-    sql += ` ORDER BY distance ASC LIMIT $${paramIndex}`;
-    params.push(limit);
+    const fetchLimit = Math.min(limit * 5, 200);
+    params.push(fetchLimit);
 
-    const rows = await this.dataSource.query(sql, params);
+    const sql = `SELECT ${selectFields},
+      (c.embedding <=> $1::vector) AS distance,
+      ${sqlCaseExpr} AS sql_match
+    FROM resume_candidates c
+    WHERE c.embedding IS NOT NULL
+      AND c.priority NOT IN ('DELETED', 'ARCHIVE')${uiWhere}
+    ORDER BY distance ASC
+    LIMIT $${paramIndex}`;
+
+    let rows: Record<string, unknown>[];
+    try {
+      this.logger.debug(`Executing SQL: ${sql}`);
+      rows = await this.dataSource.query(sql, params);
+    } catch (err) {
+      this.logger.error(`LLM SQL failed: ${err instanceof Error ? err.message : 'unknown'}, fallback`);
+      rows = await this.dataSource.query(
+        `SELECT ${selectFields}, (c.embedding <=> $1::vector) AS distance, 0 AS sql_match
+         FROM resume_candidates c
+         WHERE c.embedding IS NOT NULL AND c.priority NOT IN ('DELETED', 'ARCHIVE')
+         ORDER BY distance ASC LIMIT $2`,
+        [vectorStr, fetchLimit],
+      );
+    }
+
+    // Scoring — адаптивная нормализация + SQL бонус
+    const allSimilarities = rows.map((r) => 1 - Number(r.distance));
+    const bestSimilarity = allSimilarities.length > 0 ? Math.max(...allSimilarities) : 0;
+    const worstSimilarity = allSimilarities.length > 1 ? Math.min(...allSimilarities) : 0;
+    const simFloor = Math.max(0.05, worstSimilarity - 0.02);
+    const simCeiling = Math.max(0.3, bestSimilarity + 0.05);
+    const simRange = Math.max(simCeiling - simFloor, 0.05);
+    this.logger.debug(`Scoring: bestSim=${bestSimilarity.toFixed(3)}, floor=${simFloor.toFixed(3)}, ceiling=${simCeiling.toFixed(3)}, hasSql=${hasSql}`);
+
+    const scored = rows.map((r: Record<string, unknown>) => {
+      const id = r.id as string;
+      const distance = Number(r.distance);
+      const similarity = 1 - distance;
+      const sqlMatch = Number(r.sql_match) === 1;
+
+      // Адаптивная нормализация: simFloor→0%, simCeiling→100%
+      const normSim = Math.min(100, Math.max(0, ((similarity - simFloor) / simRange) * 100));
+
+      let matchScore: number;
+      if (hasSql && sqlMatch) {
+        // SQL совпал → бонус: embedding ранжирует в диапазоне 50-100%
+        matchScore = Math.round(50 + normSim * 0.5);
+      } else if (hasSql && !sqlMatch) {
+        // SQL не совпал → embedding ранжирует в диапазоне 0-45%
+        matchScore = Math.round(normSim * 0.45);
+      } else {
+        // Нет SQL условий → чистый embedding 0-100%
+        matchScore = Math.round(normSim);
+      }
+
+      let relevanceLevel: 'high' | 'medium' | 'low' = 'low';
+      if (matchScore >= 75) relevanceLevel = 'high';
+      else if (matchScore >= 45) relevanceLevel = 'medium';
+
+      return {
+        ...r,
+        id,
+        distance,
+        similarity: Math.round(similarity * 100) / 100,
+        matchScore,
+        relevanceLevel,
+        sqlMatch,
+      };
+    });
+
+    const result = scored
+      .sort((a, b) => b.matchScore - a.matchScore)
+      .slice(0, limit);
+
+    // Загрузить workHistory + additionalSpecializations для snippet-ов
+    const topIds = result.map((r) => r.id as string);
+    const whRows: { candidateId: string; position: string; organization: string; city: string }[] =
+      topIds.length > 0
+        ? await this.dataSource.query(
+            `SELECT wh."candidateId", wh.position, wh.organization, wh.city
+             FROM resume_work_history wh WHERE wh."candidateId" = ANY($1)
+             ORDER BY wh."startDate" DESC NULLS LAST`,
+            [topIds],
+          )
+        : [];
+    const whMap = new Map<string, typeof whRows>();
+    for (const wh of whRows) {
+      if (!whMap.has(wh.candidateId)) whMap.set(wh.candidateId, []);
+      whMap.get(wh.candidateId)!.push(wh);
+    }
+
+    // Дополнительные специализации + навыки
+    const extraRows: { id: string; additionalSpecializations: string[]; additionalSkills: string | null }[] =
+      topIds.length > 0
+        ? await this.dataSource.query(
+            `SELECT id, "additionalSpecializations", "additionalSkills" FROM resume_candidates WHERE id = ANY($1)`,
+            [topIds],
+          )
+        : [];
+    const addSpecMap = new Map(extraRows.map((r) => [r.id, r.additionalSpecializations || []]));
+    const skillsMap = new Map(extraRows.map((r) => [r.id, r.additionalSkills || '']));
+
+    // Курсы повышения квалификации
+    const cmeRows: { candidateId: string; courseName: string }[] =
+      topIds.length > 0
+        ? await this.dataSource.query(
+            `SELECT "candidateId", "courseName" FROM resume_cme_courses WHERE "candidateId" = ANY($1) AND "courseName" IS NOT NULL`,
+            [topIds],
+          )
+        : [];
+    const cmeMap = new Map<string, string[]>();
+    for (const cme of cmeRows) {
+      if (!cmeMap.has(cme.candidateId)) cmeMap.set(cme.candidateId, []);
+      cmeMap.get(cme.candidateId)!.push(cme.courseName);
+    }
+
+    // Ключевые слова для подсветки релевантности
+    const queryWords = (query + ' ' + (analysis.semanticQuery || ''))
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w) => w.length > 2);
+
+    const dataWithSnippets = result.map((r) => {
+      const id = r.id as string;
+      const wh = whMap.get(id) || [];
+      const addSpecs = addSpecMap.get(id) || [];
+      const skills = skillsMap.get(id) || '';
+      const courses = cmeMap.get(id) || [];
+      const sqlMatch = !!r.sqlMatch;
+
+      const snippet = this.buildSearchSnippet(r, wh, addSpecs, skills, courses, queryWords);
+
+      // Тип совпадения: почему кандидат в выдаче
+      let matchReason: string;
+      if (hasSql && sqlMatch) {
+        matchReason = 'Совпадение по критериям поиска';
+      } else if (hasSql && !sqlMatch) {
+        matchReason = 'Похожий профиль (по смыслу)';
+      } else {
+        matchReason = 'Семантическая близость к запросу';
+      }
+
+      return { ...r, snippet, matchReason };
+    });
 
     return {
-      data: rows.map((r: Record<string, unknown>) => ({
-        ...r,
-        distance: Number(r.distance),
-        similarity: Math.round((1 - Number(r.distance)) * 100) / 100,
-      })),
+      data: dataWithSnippets,
       query,
-      expandedQuery,
-      total: rows.length,
+      queryAnalysis: {
+        sqlConditions: analysis.sqlConditions.length,
+        semanticQuery: analysis.semanticQuery || null,
+        explanation: analysis.explanation,
+      },
+      total: dataWithSnippets.length,
     };
+  }
+
+  /**
+   * Формирует snippet — вырезку из данных кандидата, релевантную поисковому запросу.
+   */
+  private buildSearchSnippet(
+    candidate: Record<string, unknown>,
+    workHistory: { position: string; organization: string; city: string }[],
+    additionalSpecs: string[],
+    skills: string,
+    courses: string[],
+    queryWords: string[],
+  ): string {
+    const facts: string[] = [];
+
+    // Специализация
+    const spec = candidate.specialization as string | null;
+    if (spec) facts.push('Специализация: ' + spec);
+
+    // Доп. специализации
+    if (additionalSpecs.length > 0) {
+      facts.push('Доп. специализации: ' + additionalSpecs.join(', '));
+    }
+
+    // Навыки
+    if (skills) {
+      facts.push('Навыки: ' + skills);
+    }
+
+    // Курсы повышения квалификации
+    if (courses.length > 0) {
+      facts.push('Курсы: ' + courses.slice(0, 5).join(', '));
+    }
+
+    // Опыт работы
+    for (const wh of workHistory.slice(0, 5)) {
+      const parts = [wh.position, wh.organization].filter(Boolean);
+      if (wh.city) parts.push(wh.city);
+      facts.push(parts.join(' — '));
+    }
+
+    // Зарплата
+    const salary = candidate.desiredSalary as number | null;
+    if (salary != null) {
+      const salaryType = candidate.desiredSalaryType === 'PERCENT_OF_VISIT' ? '% от приёма' : 'руб.';
+      facts.push(`Зарплата: ${salary.toLocaleString('ru-RU')} ${salaryType}`);
+    }
+
+    // Ранжируем факты по релевантности запросу (частичное совпадение тоже считается)
+    const scored = facts.map((fact) => {
+      const lower = fact.toLowerCase();
+      let score = 0;
+      for (const w of queryWords) {
+        if (lower.includes(w)) score += 2; // точное вхождение
+        // Проверяем корень слова (первые 4+ символов)
+        if (w.length >= 4) {
+          const stem = w.slice(0, Math.min(w.length - 1, 6));
+          if (lower.includes(stem)) score += 1;
+        }
+      }
+      return { fact, score };
+    });
+    scored.sort((a, b) => b.score - a.score);
+
+    // Берём top-3: сначала релевантные, потом любые
+    const relevant = scored.filter((s) => s.score > 0).slice(0, 3);
+    if (relevant.length > 0) {
+      return relevant.map((s) => s.fact).join(' | ');
+    }
+    // Fallback: первые 2 факта
+    return scored.slice(0, 2).map((s) => s.fact).join(' | ');
   }
 
   /**
@@ -1397,8 +1739,8 @@ export class ResumeService {
    */
   async findSimilarByEmbedding(
     candidateId: string,
-    limit = 5,
-    maxDistance = 0.4,
+    limit = 10,
+    maxDistance = 0.55,
   ) {
     const [candidateEmb] = await this.dataSource.query(
       `SELECT embedding FROM resume_candidates WHERE id = $1`,
@@ -1411,6 +1753,7 @@ export class ResumeService {
 
     const rows = await this.dataSource.query(
       `SELECT c.id, c."fullName", c.specialization, c."aiScore",
+              c.city, c."totalExperienceYears", c."qualificationCategory",
               (c.embedding <=> (SELECT embedding FROM resume_candidates WHERE id = $1)) AS distance
        FROM resume_candidates c
        WHERE c.id != $1
@@ -1427,6 +1770,9 @@ export class ResumeService {
       fullName: r.fullName,
       specialization: r.specialization,
       aiScore: r.aiScore,
+      city: r.city,
+      totalExperienceYears: r.totalExperienceYears,
+      qualificationCategory: r.qualificationCategory,
       distance: Number(r.distance),
       similarity: Math.round((1 - Number(r.distance)) * 100) / 100,
     }));
@@ -1461,94 +1807,6 @@ export class ResumeService {
     return candidates.map(c => buildCompactProfile(c));
   }
 
-  /**
-   * Кластеризация кандидатов по embedding-ам (k-means).
-   */
-  async clusterCandidates(
-    k?: number,
-    filters?: { specialization?: string; branch?: string },
-  ) {
-    let sql = `
-      SELECT id, embedding::text as embedding
-      FROM resume_candidates
-      WHERE embedding IS NOT NULL
-        AND priority NOT IN ('DELETED', 'ARCHIVE')
-    `;
-    const params: unknown[] = [];
-    let paramIndex = 1;
-
-    if (filters?.specialization) {
-      sql += ` AND specialization = $${paramIndex}`;
-      params.push(filters.specialization);
-      paramIndex++;
-    }
-    if (filters?.branch) {
-      sql += ` AND $${paramIndex} = ANY(branches)`;
-      params.push(filters.branch);
-      paramIndex++;
-    }
-
-    const rows: { id: string; embedding: string }[] = await this.dataSource.query(sql, params);
-
-    if (rows.length === 0) {
-      return { clusters: [], totalCandidates: 0, k: 0 };
-    }
-
-    const points = rows.map(r => ({
-      id: r.id,
-      embedding: r.embedding.replace(/[\[\]]/g, '').split(',').map(Number),
-    }));
-
-    const actualK = k || suggestK(points.length);
-    const clusterResults = kMeansClustering(points, actualK);
-
-    // Обогатить данные
-    const allIds = points.map(p => p.id);
-    const candidates = await this.candidateRepo.find({
-      where: { id: In(allIds) },
-      select: ['id', 'fullName', 'specialization', 'aiScore'],
-    });
-    const candidateMap = new Map(candidates.map(c => [c.id, c]));
-
-    const enrichedClusters = clusterResults.map(cluster => {
-      const clusterCandidates = cluster.candidateIds
-        .map(id => candidateMap.get(id))
-        .filter(Boolean) as ResumeCandidate[];
-
-      const specCounts = new Map<string, number>();
-      for (const c of clusterCandidates) {
-        const spec = c.specialization || 'Без специализации';
-        specCounts.set(spec, (specCounts.get(spec) || 0) + 1);
-      }
-      const topSpecializations = [...specCounts.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([name, count]) => ({ name, count }));
-
-      const label = topSpecializations.length > 0
-        ? topSpecializations[0].name + (topSpecializations.length > 1 ? ' и др.' : '')
-        : `Кластер ${cluster.clusterId + 1}`;
-
-      return {
-        clusterId: cluster.clusterId,
-        label,
-        size: cluster.size,
-        candidates: clusterCandidates.map(c => ({
-          id: c.id,
-          fullName: c.fullName,
-          specialization: c.specialization,
-          aiScore: c.aiScore,
-        })),
-        topSpecializations,
-      };
-    });
-
-    return {
-      clusters: enrichedClusters,
-      totalCandidates: points.length,
-      k: actualK,
-    };
-  }
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  Create Candidate from Raw Text
@@ -1761,6 +2019,28 @@ export class ResumeService {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /**
+   * Get all unique tags across all candidates.
+   */
+  async listAllUniqueTags(): Promise<{ label: string; color: string | null }[]> {
+    const rows = await this.tagRepo
+      .createQueryBuilder('t')
+      .select(['t.label AS label', 't.color AS color', 'COUNT(*) AS cnt'])
+      .groupBy('t.label')
+      .addGroupBy('t.color')
+      .orderBy('cnt', 'DESC')
+      .getRawMany<{ label: string; color: string | null; cnt: string }>();
+
+    // Дедупликация по label (берём цвет от самого частого)
+    const seen = new Map<string, string | null>();
+    for (const r of rows) {
+      if (!seen.has(r.label)) {
+        seen.set(r.label, r.color);
+      }
+    }
+    return Array.from(seen.entries()).map(([label, color]) => ({ label, color }));
+  }
+
+  /**
    * List all tags for a candidate.
    */
   async listTags(candidateId: string): Promise<ResumeCandidateTag[]> {
@@ -1893,16 +2173,24 @@ export class ResumeService {
         .getRawMany<{ city: string }>(),
     ]);
 
-    // Мержим канонические специализации из справочника + фактические из кандидатов
+    // Мержим канонические специализации из справочника + фактические из кандидатов (включая дополнительные)
     const canonicalSpecs = await this.specializationRepo.find({
       select: ['name'],
       order: { name: 'ASC' },
     });
 
+    const additionalSpecsRaw = await this.candidateRepo
+      .createQueryBuilder('c')
+      .select('c.additionalSpecializations', 'additionalSpecializations')
+      .where("c.\"additionalSpecializations\" != '{}'")
+      .andWhere('c.priority != :deleted', notDeleted)
+      .getMany();
+
     const allSpecializations = [
       ...new Set([
         ...canonicalSpecs.map((s) => s.name),
         ...specializationsRaw.map((r) => r.specialization).filter(Boolean),
+        ...additionalSpecsRaw.flatMap((r) => r.additionalSpecializations || []).filter(Boolean),
       ]),
     ].sort();
 
@@ -2080,6 +2368,9 @@ export class ResumeService {
             })
             .orWhere('c.specialization ILIKE :search', {
               search: `%${filters.search}%`,
+            })
+            .orWhere("array_to_string(c.\"additionalSpecializations\", ',') ILIKE :search", {
+              search: `%${filters.search}%`,
             });
         }),
       );
@@ -2094,9 +2385,13 @@ export class ResumeService {
     }
 
     if (filters.specialization) {
-      qb.andWhere('c.specialization = :specialization', {
-        specialization: filters.specialization,
-      });
+      qb.andWhere(
+        new Brackets((sub) => {
+          sub
+            .where('c.specialization = :specFilter', { specFilter: filters.specialization })
+            .orWhere(':specFilter = ANY(c."additionalSpecializations")', { specFilter: filters.specialization });
+        }),
+      );
     }
 
     if (filters.qualificationCategory) {
@@ -2361,23 +2656,53 @@ export class ResumeService {
         })
         .getCount() ?? Promise.resolve(null),
 
-      // 10. Distinct specializations current
-      currentQb()
-        .andWhere('c.processingStatus = :completed', {
-          completed: ResumeProcessingStatus.COMPLETED,
-        })
-        .andWhere('c.specialization IS NOT NULL')
-        .select('DISTINCT c.specialization', 'specialization')
-        .getRawMany<{ specialization: string }>(),
+      // 10. Distinct specializations current (including additionalSpecializations)
+      (async () => {
+        const rows = await currentQb()
+          .andWhere('c.processingStatus = :completed', {
+            completed: ResumeProcessingStatus.COMPLETED,
+          })
+          .andWhere(
+            new Brackets((sub) => {
+              sub
+                .where('c.specialization IS NOT NULL')
+                .orWhere("c.\"additionalSpecializations\" != '{}'");
+            }),
+          )
+          .select(['c.specialization', 'c.additionalSpecializations'])
+          .getMany();
+        const specSet = new Set<string>();
+        for (const r of rows) {
+          if (r.specialization) specSet.add(r.specialization);
+          for (const s of r.additionalSpecializations || []) specSet.add(s);
+        }
+        return Array.from(specSet).map((s) => ({ specialization: s }));
+      })(),
 
-      // 11. Distinct specializations previous
-      previousQb()
-        ?.andWhere('c.processingStatus = :completed', {
-          completed: ResumeProcessingStatus.COMPLETED,
-        })
-        .andWhere('c.specialization IS NOT NULL')
-        .select('DISTINCT c.specialization', 'specialization')
-        .getRawMany<{ specialization: string }>() ?? Promise.resolve(null),
+      // 11. Distinct specializations previous (including additionalSpecializations)
+      (async () => {
+        const pQb = previousQb();
+        if (!pQb) return null;
+        const rows = await pQb
+          .andWhere('c.processingStatus = :completed', {
+            completed: ResumeProcessingStatus.COMPLETED,
+          })
+          .andWhere(
+            new Brackets((sub) => {
+              sub
+                .where('c.specialization IS NOT NULL')
+                .orWhere("c.\"additionalSpecializations\" != '{}'");
+            }),
+          )
+          .select(['c.specialization', 'c.additionalSpecializations'])
+          .getMany();
+        const specSet = new Set<string>();
+        for (const r of rows) {
+          if (r.specialization) specSet.add(r.specialization);
+          for (const s of r.additionalSpecializations || []) specSet.add(s);
+        }
+        return Array.from(specSet).map((s) => ({ specialization: s }));
+      })(),
 
       // 12. Timeline (last 12 months, branch filter only)
       (() => {
@@ -2420,6 +2745,7 @@ export class ResumeService {
         })
         .select([
           'c.specialization',
+          'c.additionalSpecializations',
           'c.qualificationCategory',
           'c.totalExperienceYears',
           'c.gender',
@@ -2440,11 +2766,17 @@ export class ResumeService {
       (() => {
         const covQb = this.candidateRepo
           .createQueryBuilder('c')
-          .select(['c.specialization', 'c.branches'])
+          .select(['c.specialization', 'c.additionalSpecializations', 'c.branches'])
           .where('c.processingStatus = :completed', {
             completed: ResumeProcessingStatus.COMPLETED,
           })
-          .andWhere('c.specialization IS NOT NULL')
+          .andWhere(
+            new Brackets((sub) => {
+              sub
+                .where('c.specialization IS NOT NULL')
+                .orWhere("c.\"additionalSpecializations\" != '{}'");
+            }),
+          )
           .andWhere("c.branches != '{}'")
           .andWhere('c.priority != :deleted', {
             deleted: ResumeCandidatePriority.DELETED,
@@ -2661,6 +2993,18 @@ export class ResumeService {
     const funnelInvited = funnelCandidates.filter(
       (c) => c.status === ResumeCandidateStatus.INVITED,
     ).length;
+    const funnelOnlineInterview = funnelCandidates.filter(
+      (c) => c.status === ResumeCandidateStatus.ONLINE_INTERVIEW,
+    ).length;
+    const funnelInterview = funnelCandidates.filter(
+      (c) => c.status === ResumeCandidateStatus.INTERVIEW,
+    ).length;
+    const funnelTrial = funnelCandidates.filter(
+      (c) => c.status === ResumeCandidateStatus.TRIAL,
+    ).length;
+    const funnelInternship = funnelCandidates.filter(
+      (c) => c.status === ResumeCandidateStatus.INTERNSHIP,
+    ).length;
     const funnelHired = funnelCandidates.filter(
       (c) => c.status === ResumeCandidateStatus.HIRED,
     ).length;
@@ -2671,6 +3015,10 @@ export class ResumeService {
       { name: 'Актуальные', value: funnelActive, color: '#6366f1' },
       { name: 'На рассмотрении', value: funnelReviewing, color: '#8b5cf6' },
       { name: 'Приглашены', value: funnelInvited, color: '#a855f7' },
+      { name: 'Онлайн собеседование', value: funnelOnlineInterview, color: '#7c3aed' },
+      { name: 'Собеседование', value: funnelInterview, color: '#4f46e5' },
+      { name: 'Пробный приём', value: funnelTrial, color: '#f59e0b' },
+      { name: 'Стажировка', value: funnelInternship, color: '#06b6d4' },
       { name: 'Приняты', value: funnelHired, color: '#22c55e' },
     ];
 
@@ -2686,8 +3034,17 @@ export class ResumeService {
 
     const specMap = new Map<string, number>();
     allCompletedCandidates.forEach((c) => {
-      const spec = c.specialization || 'Не указано';
-      specMap.set(spec, (specMap.get(spec) || 0) + 1);
+      const specs = [
+        c.specialization,
+        ...(c.additionalSpecializations || []),
+      ].filter(Boolean) as string[];
+      if (specs.length === 0) {
+        specMap.set('Не указано', (specMap.get('Не указано') || 0) + 1);
+      } else {
+        for (const spec of specs) {
+          specMap.set(spec, (specMap.get(spec) || 0) + 1);
+        }
+      }
     });
     const specializations = Array.from(specMap.entries())
       .map(([name, count]) => ({ name, count }))
@@ -2794,10 +3151,10 @@ export class ResumeService {
 
     const branchMap = new Map<
       string,
-      { NEW: number; REVIEWING: number; INVITED: number; HIRED: number }
+      { NEW: number; REVIEWING: number; INVITED: number; ONLINE_INTERVIEW: number; INTERVIEW: number; TRIAL: number; INTERNSHIP: number; HIRED: number }
     >();
     BRANCHES.forEach((b) =>
-      branchMap.set(b, { NEW: 0, REVIEWING: 0, INVITED: 0, HIRED: 0 }),
+      branchMap.set(b, { NEW: 0, REVIEWING: 0, INVITED: 0, ONLINE_INTERVIEW: 0, INTERVIEW: 0, TRIAL: 0, INTERNSHIP: 0, HIRED: 0 }),
     );
 
     branchCandidates.forEach((c) => {
@@ -2828,12 +3185,17 @@ export class ResumeService {
     });
 
     coverageCandidates.forEach((c) => {
-      const spec = c.specialization!;
-      const row = matrix.get(spec);
-      if (row) {
-        (c.branches || []).forEach((b) => {
-          if (b in row) row[b]++;
-        });
+      const specs = [
+        c.specialization,
+        ...(c.additionalSpecializations || []),
+      ].filter(Boolean) as string[];
+      for (const spec of specs) {
+        const row = matrix.get(spec);
+        if (row) {
+          (c.branches || []).forEach((b) => {
+            if (b in row) row[b]++;
+          });
+        }
       }
     });
 
@@ -3005,11 +3367,14 @@ export class ResumeService {
         // Опыт
         totalExperienceYears: dto.totalExperienceYears ?? null,
         specialtyExperienceYears: dto.specialtyExperienceYears ?? null,
+        // Желаемая ЗП
+        desiredSalary: dto.desiredSalary ?? null,
+        desiredSalaryType: (dto.desiredSalaryType as any) || null,
         // Дополнительно
         nmoPoints: dto.nmoPoints ?? null,
         publications: dto.publications || null,
         languages: dto.languages || [],
-        additionalSkills: dto.additionalSkills || null,
+        additionalSkills: [dto.additionalSkills, dto.freeFormNote].filter(Boolean).join('\n\n') || null,
       });
 
       const savedCandidate = await manager.save(
@@ -3116,9 +3481,13 @@ export class ResumeService {
     }
 
     if (filters.specialization) {
-      qb.andWhere('c.specialization = :specialization', {
-        specialization: filters.specialization,
-      });
+      qb.andWhere(
+        new Brackets((sub) => {
+          sub
+            .where('c.specialization = :specFilter', { specFilter: filters.specialization })
+            .orWhere(':specFilter = ANY(c."additionalSpecializations")', { specFilter: filters.specialization });
+        }),
+      );
     }
 
     if (filters.qualificationCategory) {
@@ -3688,5 +4057,306 @@ export class ResumeService {
     if (!candidate) throw new NotFoundException('Кандидат не найден');
 
     return this.scoreCandidateInternal(candidateId);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  Leads (Банк заявок)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  async findLeads(filters: {
+    search?: string;
+    status?: string;
+    source?: string;
+    specialization?: string;
+    city?: string;
+    page?: number;
+    limit?: number;
+    sort?: string;
+    order?: 'ASC' | 'DESC';
+  }): Promise<{ data: ResumeLead[]; total: number; page: number; limit: number }> {
+    const page = filters.page || 1;
+    const limit = Math.min(Math.max(filters.limit || 20, 1), 100);
+
+    const qb = this.leadRepo
+      .createQueryBuilder('l')
+      .leftJoinAndSelect('l.tags', 'tags');
+
+    if (filters.search) {
+      qb.where(
+        new Brackets((sub) => {
+          sub
+            .where('l.name ILIKE :search', { search: `%${filters.search}%` })
+            .orWhere('l.phone ILIKE :search', { search: `%${filters.search}%` })
+            .orWhere('l.email ILIKE :search', { search: `%${filters.search}%` });
+        }),
+      );
+    }
+
+    if (filters.status) {
+      qb.andWhere('l.status = :status', { status: filters.status });
+    }
+
+    if (filters.source) {
+      qb.andWhere('l.source = :source', { source: filters.source });
+    }
+
+    if (filters.specialization) {
+      qb.andWhere('l.specialization = :specialization', {
+        specialization: filters.specialization,
+      });
+    }
+
+    if (filters.city) {
+      qb.andWhere('l.city = :city', { city: filters.city });
+    }
+
+    const sortWhitelist: Record<string, string> = {
+      createdAt: 'l.createdAt',
+      name: 'l.name',
+      status: 'l.status',
+    };
+    const sortColumn = sortWhitelist[filters.sort || 'createdAt'] || 'l.createdAt';
+    const sortOrder = filters.order === 'ASC' ? 'ASC' : 'DESC';
+
+    qb.orderBy(sortColumn, sortOrder);
+    qb.skip((page - 1) * limit).take(limit);
+
+    const [data, total] = await qb.getManyAndCount();
+
+    return { data, total, page, limit };
+  }
+
+  async findLeadById(id: string): Promise<ResumeLead> {
+    const lead = await this.leadRepo.findOne({
+      where: { id },
+      relations: ['tags'],
+    });
+    if (!lead) throw new NotFoundException('Заявка не найдена');
+    return lead;
+  }
+
+  async createLead(dto: CreateLeadDto): Promise<ResumeLead> {
+    const lead = this.leadRepo.create({
+      name: dto.name || null,
+      phone: dto.phone || null,
+      email: dto.email || null,
+      city: dto.city || null,
+      specialization: dto.specialization || null,
+      source: dto.source || null,
+      notes: dto.notes || null,
+      doctorTypes: (dto.doctorTypes || []) as ResumeCandidateDoctorType[],
+      branches: dto.branches || [],
+      desiredSalary: dto.desiredSalary ?? null,
+      desiredSalaryType: (dto.desiredSalaryType as ResumeSalaryType) || null,
+    });
+
+    return this.leadRepo.save(lead);
+  }
+
+  async updateLead(id: string, dto: UpdateLeadDto): Promise<ResumeLead> {
+    const lead = await this.leadRepo.findOne({ where: { id } });
+    if (!lead) throw new NotFoundException('Заявка не найдена');
+
+    if (dto.name !== undefined) lead.name = dto.name || null;
+    if (dto.phone !== undefined) lead.phone = dto.phone || null;
+    if (dto.email !== undefined) lead.email = dto.email || null;
+    if (dto.city !== undefined) lead.city = dto.city || null;
+    if (dto.specialization !== undefined) lead.specialization = dto.specialization || null;
+    if (dto.source !== undefined) lead.source = dto.source || null;
+    if (dto.notes !== undefined) lead.notes = dto.notes || null;
+    if (dto.doctorTypes !== undefined) lead.doctorTypes = dto.doctorTypes as ResumeCandidateDoctorType[];
+    if (dto.branches !== undefined) lead.branches = dto.branches;
+    if (dto.desiredSalary !== undefined) lead.desiredSalary = dto.desiredSalary ?? null;
+    if (dto.desiredSalaryType !== undefined) lead.desiredSalaryType = (dto.desiredSalaryType as ResumeSalaryType) || null;
+    if (dto.status !== undefined) lead.status = dto.status;
+
+    return this.leadRepo.save(lead);
+  }
+
+  async deleteLead(id: string): Promise<void> {
+    const lead = await this.leadRepo.findOne({ where: { id }, select: ['id'] });
+    if (!lead) throw new NotFoundException('Заявка не найдена');
+    await this.leadRepo.remove(lead);
+  }
+
+  async convertLeadToCandidate(
+    leadId: string,
+    file?: Express.Multer.File,
+    rawText?: string,
+  ): Promise<ResumeCandidate> {
+    const lead = await this.leadRepo.findOne({
+      where: { id: leadId },
+      relations: ['tags'],
+    });
+    if (!lead) throw new NotFoundException('Заявка не найдена');
+    if (lead.status === ResumeLeadStatus.CONVERTED) {
+      throw new BadRequestException('Заявка уже конвертирована в кандидата');
+    }
+    if (!file && !rawText) {
+      throw new BadRequestException('Необходимо загрузить файл резюме или вставить текст');
+    }
+
+    let uploadedFile: ResumeUploadedFile | null = null;
+    if (file) {
+      uploadedFile = await this.uploadFile(file);
+    }
+
+    let candidate: ResumeCandidate;
+
+    await this.dataSource.transaction(async (manager) => {
+      candidate = manager.create(ResumeCandidate, {
+        fullName: lead.name || 'Обработка...',
+        phone: lead.phone || null,
+        email: lead.email || null,
+        city: lead.city || null,
+        specialization: lead.specialization || null,
+        rawText: rawText || null,
+        uploadedFileId: uploadedFile?.id || null,
+        processingStatus: ResumeProcessingStatus.PENDING,
+        status: ResumeCandidateStatus.NEW,
+        priority: ResumeCandidatePriority.ACTIVE,
+        doctorTypes: lead.doctorTypes || [],
+        branches: lead.branches || [],
+        desiredSalary: lead.desiredSalary ?? null,
+        desiredSalaryType: lead.desiredSalaryType || null,
+      });
+      candidate = await manager.save(ResumeCandidate, candidate);
+
+      // Перенести теги
+      if (lead.tags && lead.tags.length > 0) {
+        const tagEntities = lead.tags.map((t) =>
+          manager.create(ResumeCandidateTag, {
+            candidateId: candidate.id,
+            label: t.label,
+            color: t.color,
+          }),
+        );
+        await manager.save(ResumeCandidateTag, tagEntities);
+      }
+
+      // Перенести заметку
+      if (lead.notes) {
+        const note = manager.create(ResumeCandidateNote, {
+          candidateId: candidate.id,
+          content: lead.notes,
+          authorName: 'Система (из заявки)',
+        });
+        await manager.save(ResumeCandidateNote, note);
+      }
+
+      // Обновить лид
+      await manager.update(ResumeLead, leadId, {
+        status: ResumeLeadStatus.CONVERTED,
+        convertedCandidateId: candidate.id,
+      });
+    });
+
+    // Запустить AI-обработку
+    this.enqueueProcessing(candidate!.id);
+
+    return candidate!;
+  }
+
+  async listAllUniqueLeadTags(): Promise<{ label: string; color: string | null }[]> {
+    const rows = await this.leadTagRepo
+      .createQueryBuilder('t')
+      .select(['t.label AS label', 't.color AS color', 'COUNT(*) AS cnt'])
+      .groupBy('t.label')
+      .addGroupBy('t.color')
+      .orderBy('cnt', 'DESC')
+      .getRawMany<{ label: string; color: string | null; cnt: string }>();
+
+    const seen = new Map<string, string | null>();
+    for (const r of rows) {
+      if (!seen.has(r.label)) {
+        seen.set(r.label, r.color);
+      }
+    }
+    return Array.from(seen.entries()).map(([label, color]) => ({ label, color }));
+  }
+
+  async addLeadTag(
+    leadId: string,
+    dto: CreateTagDto,
+  ): Promise<ResumeLeadTag> {
+    const lead = await this.leadRepo.findOne({
+      where: { id: leadId },
+      select: ['id'],
+    });
+    if (!lead) throw new NotFoundException('Заявка не найдена');
+
+    const tag = this.leadTagRepo.create({
+      leadId,
+      label: dto.label,
+      color: dto.color || null,
+    });
+    return this.leadTagRepo.save(tag);
+  }
+
+  async deleteLeadTag(tagId: string): Promise<void> {
+    const tag = await this.leadTagRepo.findOne({ where: { id: tagId } });
+    if (!tag) throw new NotFoundException('Тег не найден');
+    await this.leadTagRepo.remove(tag);
+  }
+
+  async replaceLeadTags(
+    leadId: string,
+    tags: { label: string; color?: string }[],
+  ): Promise<ResumeLeadTag[]> {
+    const lead = await this.leadRepo.findOne({
+      where: { id: leadId },
+      select: ['id'],
+    });
+    if (!lead) throw new NotFoundException('Заявка не найдена');
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.delete(ResumeLeadTag, { leadId });
+
+      if (tags.length > 0) {
+        const tagEntities = tags.map((t) =>
+          manager.create(ResumeLeadTag, {
+            leadId,
+            label: t.label,
+            color: t.color || null,
+          }),
+        );
+        await manager.save(ResumeLeadTag, tagEntities);
+      }
+    });
+
+    return this.leadTagRepo.find({ where: { leadId } });
+  }
+
+  async getLeadStats(): Promise<{
+    byStatus: Record<string, number>;
+    total: number;
+  }> {
+    const leads = await this.leadRepo
+      .createQueryBuilder('l')
+      .select('l.status', 'status')
+      .addSelect('COUNT(*)', 'count')
+      .groupBy('l.status')
+      .getRawMany();
+
+    const byStatus: Record<string, number> = {};
+    let total = 0;
+    for (const row of leads) {
+      byStatus[row.status] = Number(row.count);
+      total += Number(row.count);
+    }
+
+    return { byStatus, total };
+  }
+
+  async getLeadSources(): Promise<string[]> {
+    const rows = await this.leadRepo
+      .createQueryBuilder('l')
+      .select('DISTINCT l.source', 'source')
+      .where('l.source IS NOT NULL')
+      .andWhere("l.source != ''")
+      .orderBy('l.source', 'ASC')
+      .getRawMany();
+
+    return rows.map((r) => r.source);
   }
 }

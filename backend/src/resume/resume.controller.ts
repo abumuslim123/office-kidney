@@ -28,6 +28,8 @@ import { ResumeService } from './resume.service';
 import { UpdateCandidateDto } from './dto/update-candidate.dto';
 import { CreateNoteDto } from './dto/create-note.dto';
 import { CreateTagDto } from './dto/create-tag.dto';
+import { CreateLeadDto } from './dto/create-lead.dto';
+import { UpdateLeadDto } from './dto/update-lead.dto';
 
 @Controller('resume')
 @UseGuards(JwtAuthGuard, PermissionsGuard, ResumeFeatureGuard)
@@ -201,6 +203,16 @@ export class ResumeController {
     @Query('specialization') specialization?: string,
     @Query('branch') branch?: string,
     @Query('status') status?: string,
+    @Query('priority') priority?: string,
+    @Query('doctorType') doctorType?: string,
+    @Query('qualificationCategory') qualificationCategory?: string,
+    @Query('city') city?: string,
+    @Query('workCity') workCity?: string,
+    @Query('educationCity') educationCity?: string,
+    @Query('experienceMin') experienceMin?: string,
+    @Query('experienceMax') experienceMax?: string,
+    @Query('accreditation') accreditation?: string,
+    @Query('scoreMin') scoreMin?: string,
   ) {
     if (!q?.trim()) {
       throw new BadRequestException('Параметр q обязателен');
@@ -208,21 +220,22 @@ export class ResumeController {
     return this.resumeService.semanticSearch(
       q.trim(),
       limit ? Math.min(Math.max(Number(limit), 1), 100) : 20,
-      threshold ? Number(threshold) : 0.65,
-      { specialization, branch, status },
+      threshold ? Number(threshold) : 0.55,
+      {
+        specialization, branch, status, priority, doctorType,
+        qualificationCategory, city, workCity, educationCity,
+        experienceMin: experienceMin ? Number(experienceMin) : undefined,
+        experienceMax: experienceMax ? Number(experienceMax) : undefined,
+        accreditation, scoreMin: scoreMin ? Number(scoreMin) : undefined,
+      },
     );
   }
 
-  @Get('candidates/clusters')
-  clusterCandidates(
-    @Query('k') k?: string,
-    @Query('specialization') specialization?: string,
-    @Query('branch') branch?: string,
-  ) {
-    return this.resumeService.clusterCandidates(
-      k ? Math.min(Math.max(Number(k), 1), 20) : undefined,
-      { specialization, branch },
-    );
+
+  @Get('embeddings/status')
+  @Permissions('hr', 'hr_resume_edit')
+  embeddingsStatus() {
+    return this.resumeService.getEmbeddingsStatus();
   }
 
   @Post('embeddings/generate')
@@ -334,6 +347,11 @@ export class ResumeController {
   // Tags
   // ---------------------------------------------------------------------------
 
+  @Get('tags/all')
+  listAllUniqueTags() {
+    return this.resumeService.listAllUniqueTags();
+  }
+
   @Get('candidates/:id/tags')
   listTags(@Param('id') id: string) {
     return this.resumeService.listTags(id);
@@ -401,5 +419,127 @@ export class ResumeController {
   async removeTelegramChat(@Param('chatId') chatId: string) {
     await this.resumeService.removeTelegramChat(chatId);
     return { success: true };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Leads (Банк заявок)
+  // ---------------------------------------------------------------------------
+
+  @Get('leads/sources')
+  @Permissions('hr', 'hr_resume_view')
+  getLeadSources() {
+    return this.resumeService.getLeadSources();
+  }
+
+  @Get('leads/stats')
+  @Permissions('hr', 'hr_resume_view')
+  getLeadStats() {
+    return this.resumeService.getLeadStats();
+  }
+
+  @Get('leads')
+  @Permissions('hr', 'hr_resume_view')
+  findLeads(
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+    @Query('source') source?: string,
+    @Query('specialization') specialization?: string,
+    @Query('city') city?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('sort') sort?: string,
+    @Query('order') order?: 'ASC' | 'DESC',
+  ) {
+    return this.resumeService.findLeads({
+      search,
+      status,
+      source,
+      specialization,
+      city,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      sort,
+      order,
+    });
+  }
+
+  @Get('leads/:id')
+  @Permissions('hr', 'hr_resume_view')
+  findLeadById(@Param('id') id: string) {
+    return this.resumeService.findLeadById(id);
+  }
+
+  @Post('leads')
+  @Permissions('hr', 'hr_resume_edit')
+  createLead(@Body() dto: CreateLeadDto) {
+    return this.resumeService.createLead(dto);
+  }
+
+  @Patch('leads/:id')
+  @Permissions('hr', 'hr_resume_edit')
+  updateLead(@Param('id') id: string, @Body() dto: UpdateLeadDto) {
+    return this.resumeService.updateLead(id, dto);
+  }
+
+  @Delete('leads/:id')
+  @Permissions('hr', 'hr_resume_delete')
+  @HttpCode(HttpStatus.OK)
+  async deleteLead(@Param('id') id: string) {
+    await this.resumeService.deleteLead(id);
+    return { success: true };
+  }
+
+  @Post('leads/:id/convert')
+  @Permissions('hr', 'hr_resume_edit')
+  @UseInterceptors(
+    FileInterceptor('file', { storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }),
+  )
+  convertLeadToCandidate(
+    @Param('id') id: string,
+    @UploadedFile() file?: Express.Multer.File,
+    @Body('rawText') rawText?: string,
+  ) {
+    return this.resumeService.convertLeadToCandidate(id, file, rawText);
+  }
+
+  @Get('lead-tags/all')
+  listAllUniqueLeadTags() {
+    return this.resumeService.listAllUniqueLeadTags();
+  }
+
+  @Post('leads/:id/tags')
+  @Permissions('hr', 'hr_resume_edit')
+  addLeadTag(@Param('id') id: string, @Body() dto: CreateTagDto) {
+    return this.resumeService.addLeadTag(id, dto);
+  }
+
+  @Delete('lead-tags/:tagId')
+  @Permissions('hr', 'hr_resume_edit')
+  @HttpCode(HttpStatus.OK)
+  async deleteLeadTag(@Param('tagId') tagId: string) {
+    await this.resumeService.deleteLeadTag(tagId);
+    return { success: true };
+  }
+
+  @Put('leads/:id/tags')
+  @Permissions('hr', 'hr_resume_edit')
+  replaceLeadTags(
+    @Param('id') id: string,
+    @Body() body: { tags: { label: string; color?: string }[] },
+  ) {
+    if (!Array.isArray(body.tags)) {
+      throw new BadRequestException('tags должен быть массивом');
+    }
+    if (body.tags.length > 20) {
+      throw new BadRequestException('Максимум 20 тегов');
+    }
+    for (const tag of body.tags) {
+      if (typeof tag.label !== 'string' || tag.label.length > 100) {
+        throw new BadRequestException(
+          'Название тега слишком длинное (максимум 100 символов)',
+        );
+      }
+    }
+    return this.resumeService.replaceLeadTags(id, body.tags);
   }
 }

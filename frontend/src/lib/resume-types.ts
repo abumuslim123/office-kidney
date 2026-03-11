@@ -17,9 +17,13 @@ export enum ResumeCandidateStatus {
   NEW = 'NEW',
   REVIEWING = 'REVIEWING',
   INVITED = 'INVITED',
+  ONLINE_INTERVIEW = 'ONLINE_INTERVIEW',
+  INTERVIEW = 'INTERVIEW',
+  TRIAL = 'TRIAL',
+  INTERNSHIP = 'INTERNSHIP',
   HIRED = 'HIRED',
-  RESERVE = 'RESERVE',
   REJECTED = 'REJECTED',
+  RESERVE = 'RESERVE',
 }
 
 export enum ResumeCandidatePriority {
@@ -156,6 +160,8 @@ export interface ResumeCandidate {
   notes?: ResumeCandidateNote[];
   tags?: ResumeCandidateTag[];
   aiScore: number | null;
+  desiredSalary: number | null;
+  desiredSalaryType: 'FIXED_RUB' | 'PERCENT_OF_VISIT' | null;
 }
 
 // AI Score types
@@ -222,6 +228,10 @@ export interface BranchDistributionItem {
   NEW: number;
   REVIEWING: number;
   INVITED: number;
+  ONLINE_INTERVIEW: number;
+  INTERVIEW: number;
+  TRIAL: number;
+  INTERNSHIP: number;
   HIRED: number;
   total: number;
 }
@@ -259,4 +269,55 @@ export interface AnalyticsData {
   scoreDistribution: { name: string; count: number }[];
   topTags: TagCount[];
   expiringAccreditations: { id: string; fullName: string; specialization: string | null; accreditationExpiryDate: string }[];
+}
+
+// ─── Leads (Банк заявок) ────────────────────────────────────
+
+export enum ResumeLeadStatus {
+  NEW = 'NEW',
+  IN_PROGRESS = 'IN_PROGRESS',
+  CONTACTED = 'CONTACTED',
+  CONVERTED = 'CONVERTED',
+  NOT_RELEVANT = 'NOT_RELEVANT',
+}
+
+export interface ResumeLeadTag {
+  id: string;
+  label: string;
+  color: string | null;
+  leadId: string;
+}
+
+export interface ResumeLead {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+  city: string | null;
+  specialization: string | null;
+  source: string | null;
+  notes: string | null;
+  doctorTypes: ResumeCandidateDoctorType[];
+  branches: string[];
+  desiredSalary: number | null;
+  desiredSalaryType: 'FIXED_RUB' | 'PERCENT_OF_VISIT' | null;
+  status: ResumeLeadStatus;
+  convertedCandidateId: string | null;
+  tags?: ResumeLeadTag[];
+}
+
+// ─── Семантический поиск / Похожие ──────────────
+
+export interface SimilarCandidate {
+  id: string;
+  fullName: string;
+  specialization: string | null;
+  aiScore: number | null;
+  city: string | null;
+  totalExperienceYears: number | null;
+  qualificationCategory: string | null;
+  distance: number;
+  similarity: number;
 }

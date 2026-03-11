@@ -245,6 +245,16 @@ export class PublicApplySubmitDto {
   @IsOptional()
   specialtyExperienceYears?: number | null;
 
+  // ─── Желаемая ЗП ──────────────────────────────────────────────────────
+
+  @IsNumber()
+  @IsOptional()
+  desiredSalary?: number | null;
+
+  @IsString()
+  @IsOptional()
+  desiredSalaryType?: string;
+
   // ─── Дополнительно ─────────────────────────────────────────────────────
 
   @IsNumber()
@@ -283,6 +293,11 @@ export class PublicApplySubmitDto {
   @Type(() => CmeCourseItemDto)
   @IsOptional()
   cmeCourses?: CmeCourseItemDto[];
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(5000)
+  freeFormNote?: string;
 
   // ─── UI-only поля (разрешены, но не сохраняются) ────────────────────────
 

@@ -1,25 +1,72 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { api } from '../../lib/api';
-import type { ResumeCandidateTag } from '../../lib/resume-types';
+import type { ResumeCandidateTag, ResumeLeadTag } from '../../lib/resume-types';
 import { PREDEFINED_TAGS } from '../../lib/resume-constants';
 
+type TagItem = ResumeCandidateTag | ResumeLeadTag;
+
 type Props = {
+  /** ID сущности (кандидат или заявка) */
+  entityId: string;
+  /** Тип сущности */
+  entityType?: 'candidate' | 'lead';
+  /** Текущие теги */
+  tags: TagItem[];
+  /** Callback после обновления */
+  onUpdated: () => void;
+};
+
+// Backward-compatible alias
+type LegacyProps = {
   candidateId: string;
   tags: ResumeCandidateTag[];
   onUpdated: () => void;
 };
 
-export default function ResumeTagsManager({ candidateId, tags, onUpdated }: Props) {
+export default function ResumeTagsManager(props: Props | LegacyProps) {
+  // Поддержка обратной совместимости
+  const entityId = 'entityId' in props ? props.entityId : props.candidateId;
+  const entityType = 'entityType' in props ? (props.entityType || 'candidate') : 'candidate';
+  const { tags, onUpdated } = props;
+
   const [newLabel, setNewLabel] = useState('');
   const [newColor, setNewColor] = useState('#3b82f6');
   const [adding, setAdding] = useState(false);
+  const [allTags, setAllTags] = useState<{ label: string; color: string | null }[]>([]);
+
+  const allTagsEndpoint = entityType === 'lead' ? '/resume/lead-tags/all' : '/resume/tags/all';
+  const addTagEndpoint = entityType === 'lead'
+    ? `/resume/leads/${entityId}/tags`
+    : `/resume/candidates/${entityId}/tags`;
+  const deleteTagEndpoint = (tagId: string) =>
+    entityType === 'lead' ? `/resume/lead-tags/${tagId}` : `/resume/tags/${tagId}`;
+
+  useEffect(() => {
+    api.get<{ label: string; color: string | null }[]>(allTagsEndpoint)
+      .then((res) => setAllTags(res.data))
+      .catch(() => {});
+  }, [tags]);
+
+  const existingLabels = new Set(tags.map((t) => t.label));
+
+  // Объединяем предзаданные + глобальные теги
+  const mergedSuggestions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of PREDEFINED_TAGS) map.set(p.label, p.color);
+    for (const t of allTags) {
+      if (!map.has(t.label)) map.set(t.label, t.color || '#6b7280');
+    }
+    return Array.from(map.entries())
+      .map(([label, color]) => ({ label, color }))
+      .filter((t) => !existingLabels.has(t.label));
+  }, [allTags, existingLabels]);
 
   const handleAdd = async (label: string, color: string) => {
     if (!label.trim()) return;
     if (tags.some((t) => t.label === label.trim())) return;
     setAdding(true);
     try {
-      await api.post(`/resume/candidates/${candidateId}/tags`, {
+      await api.post(addTagEndpoint, {
         label: label.trim(),
         color,
       });
@@ -34,7 +81,7 @@ export default function ResumeTagsManager({ candidateId, tags, onUpdated }: Prop
 
   const handleRemove = async (tagId: string) => {
     try {
-      await api.delete(`/resume/candidates/${candidateId}/tags/${tagId}`);
+      await api.delete(deleteTagEndpoint(tagId));
       onUpdated();
     } catch {
       /* ignore */
@@ -70,7 +117,7 @@ export default function ResumeTagsManager({ candidateId, tags, onUpdated }: Prop
 
       <div className="space-y-2">
         <div className="flex flex-wrap gap-1.5">
-          {PREDEFINED_TAGS.filter((p) => !tags.some((t) => t.label === p.label)).map((p) => (
+          {mergedSuggestions.map((p) => (
             <button
               key={p.label}
               type="button"
@@ -78,6 +125,10 @@ export default function ResumeTagsManager({ candidateId, tags, onUpdated }: Prop
               disabled={adding}
               className="px-2.5 py-1 rounded-full text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
             >
+              <span
+                className="inline-block w-2 h-2 rounded-full mr-1"
+                style={{ backgroundColor: p.color }}
+              />
               + {p.label}
             </button>
           ))}

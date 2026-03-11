@@ -52,8 +52,13 @@ type Props = {
   onChange: (f: ResumeFilters) => void;
   onExport: () => void;
   onDeduplicate: () => void;
+  onGenerateEmbeddings?: () => void;
+  embeddingsStatus?: { total: number; ready: number; pending: number } | null;
   exporting?: boolean;
   deduplicating?: boolean;
+  generatingEmbeddings?: boolean;
+  semanticMode?: boolean;
+  onSemanticToggle?: () => void;
 };
 
 export { emptyFilters };
@@ -144,8 +149,13 @@ export default function ResumeFiltersBar({
   onChange,
   onExport,
   onDeduplicate,
+  onGenerateEmbeddings,
+  embeddingsStatus,
   exporting,
   deduplicating,
+  generatingEmbeddings,
+  semanticMode,
+  onSemanticToggle,
 }: Props) {
   const [showExtra, setShowExtra] = useState(false);
   const [options, setOptions] = useState<FilterOptions>({ cities: [], workCities: [], educationCities: [], specializations: [] });
@@ -195,11 +205,25 @@ export default function ResumeFiltersBar({
       <div className="flex flex-wrap items-center gap-2">
         <input
           type="text"
-          placeholder="Поиск по ФИО..."
+          placeholder={semanticMode ? 'Семантический поиск...' : 'Поиск по ФИО...'}
           value={localSearch}
           onChange={(e) => handleSearchChange(e.target.value)}
           className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-56 focus:ring-2 focus:ring-accent/30 focus:border-accent"
         />
+        {onSemanticToggle && (
+          <button
+            type="button"
+            onClick={onSemanticToggle}
+            className={`px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${
+              semanticMode
+                ? 'bg-indigo-100 text-indigo-700 border-indigo-300'
+                : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'
+            }`}
+            title="Семантический поиск — ищет по смыслу, а не по точному совпадению"
+          >
+            AI поиск
+          </button>
+        )}
         <SpecializationCombobox
           value={filters.specialization}
           onChange={(v) => update({ specialization: v })}
@@ -265,6 +289,35 @@ export default function ResumeFiltersBar({
               </svg>
             )}
           </button>
+          {onGenerateEmbeddings && (
+            <button
+              type="button"
+              onClick={onGenerateEmbeddings}
+              disabled={generatingEmbeddings}
+              className="relative p-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+              title={embeddingsStatus
+                ? `Эмбеддинги: ${embeddingsStatus.ready} из ${embeddingsStatus.total} готово${embeddingsStatus.pending > 0 ? `, ${embeddingsStatus.pending} ожидают` : ''}`
+                : 'Обновить эмбеддинги для AI-поиска'}
+            >
+              {generatingEmbeddings ? (
+                <svg className="w-4 h-4 animate-spin text-purple-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+              ) : (
+                <svg className="w-4 h-4 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+              )}
+              {embeddingsStatus && embeddingsStatus.pending > 0 && !generatingEmbeddings && (
+                <span className="absolute -top-1.5 -right-1.5 bg-purple-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                  {embeddingsStatus.pending}
+                </span>
+              )}
+              {generatingEmbeddings && embeddingsStatus && (
+                <span className="absolute -top-1.5 -right-1.5 bg-purple-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 px-0.5 flex items-center justify-center">
+                  {embeddingsStatus.ready}/{embeddingsStatus.total}
+                </span>
+              )}
+            </button>
+          )}
           {Object.values(filters).some(Boolean) && (
             <button
               type="button"

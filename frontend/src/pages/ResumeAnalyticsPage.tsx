@@ -294,7 +294,11 @@ export default function ResumeAnalyticsPage() {
                 <Legend />
                 <Bar dataKey="NEW" stackId="a" fill="#9ca3af" name="Новый" />
                 <Bar dataKey="REVIEWING" stackId="a" fill="#3b82f6" name="На рассмотрении" />
-                <Bar dataKey="INVITED" stackId="a" fill="#8b5cf6" name="Приглашён" />
+                <Bar dataKey="INVITED" stackId="a" fill="#8b5cf6" name="Приглашен на собеседование" />
+                <Bar dataKey="ONLINE_INTERVIEW" stackId="a" fill="#7c3aed" name="Онлайн собеседование" />
+                <Bar dataKey="INTERVIEW" stackId="a" fill="#4f46e5" name="Собеседование" />
+                <Bar dataKey="TRIAL" stackId="a" fill="#f59e0b" name="Пробный приём" />
+                <Bar dataKey="INTERNSHIP" stackId="a" fill="#06b6d4" name="Стажировка" />
                 <Bar dataKey="HIRED" stackId="a" fill="#10b981" name="Принят" />
               </BarChart>
             </ResponsiveContainer>

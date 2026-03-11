@@ -3,17 +3,23 @@ export const QUALIFICATION_CATEGORIES: Record<string, string> = {
 };
 
 export const CANDIDATE_STATUSES: Record<string, string> = {
-  NEW: 'Новый', REVIEWING: 'На рассмотрении', INVITED: 'Приглашён', HIRED: 'Принят',
-  RESERVE: 'Кадровый резерв', REJECTED: 'Не подходит',
+  NEW: 'Новый', REVIEWING: 'На рассмотрении', INVITED: 'Приглашен на собеседование',
+  ONLINE_INTERVIEW: 'Онлайн собеседование', INTERVIEW: 'Собеседование',
+  TRIAL: 'Пробный приём', INTERNSHIP: 'Стажировка', HIRED: 'Принят',
+  REJECTED: 'Не подходит', RESERVE: 'Кадровый резерв',
 };
 
 export const CANDIDATE_STATUS_COLORS: Record<string, string> = {
   NEW: 'bg-gray-100 text-gray-800',
   REVIEWING: 'bg-blue-100 text-blue-800',
   INVITED: 'bg-purple-100 text-purple-800',
+  ONLINE_INTERVIEW: 'bg-violet-100 text-violet-800',
+  INTERVIEW: 'bg-indigo-100 text-indigo-800',
+  TRIAL: 'bg-amber-100 text-amber-800',
+  INTERNSHIP: 'bg-cyan-100 text-cyan-800',
   HIRED: 'bg-emerald-100 text-emerald-800',
-  RESERVE: 'bg-yellow-100 text-yellow-800',
   REJECTED: 'bg-red-100 text-red-800',
+  RESERVE: 'bg-yellow-100 text-yellow-800',
 };
 
 export const CANDIDATE_PRIORITIES: Record<string, string> = {
@@ -57,6 +63,26 @@ export const PREDEFINED_TAGS = [
   { label: 'Возможный дубликат', color: '#ef4444' },
   { label: 'Дубликат', color: '#dc2626' },
 ] as const;
+
+// ─── Leads (Банк заявок) ────────────────────────────────────
+
+export const LEAD_STATUSES: Record<string, string> = {
+  NEW: 'Новый',
+  IN_PROGRESS: 'В работе',
+  CONTACTED: 'Связались',
+  CONVERTED: 'Конвертирован',
+  NOT_RELEVANT: 'Не актуален',
+};
+
+export const LEAD_STATUS_COLORS: Record<string, string> = {
+  NEW: 'bg-gray-100 text-gray-800',
+  IN_PROGRESS: 'bg-blue-100 text-blue-800',
+  CONTACTED: 'bg-purple-100 text-purple-800',
+  CONVERTED: 'bg-emerald-100 text-emerald-800',
+  NOT_RELEVANT: 'bg-red-100 text-red-800',
+};
+
+// ─────────────────────────────────────────────────────────────
 
 export const CATEGORY_COLORS: Record<string, string> = {
   HIGHEST: 'bg-amber-100 text-amber-800',

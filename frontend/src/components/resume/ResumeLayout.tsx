@@ -4,8 +4,10 @@ import HrTabs from '../HrTabs';
 
 const sideLinks = [
   { to: '/hr/resume', label: 'Загрузка', end: true },
+  { to: '/hr/resume/leads', label: 'Заявки' },
   { to: '/hr/resume/candidates', label: 'Кандидаты' },
   { to: '/hr/resume/analytics', label: 'Аналитика' },
+
   { to: '/hr/resume/archive', label: 'Архив' },
   { to: '/hr/resume/trash', label: 'Корзина' },
 ];
