@@ -12,6 +12,8 @@ import { ResumeCandidateTag } from './entities/resume-candidate-tag.entity';
 import { ResumeTelegramChat } from './entities/resume-telegram-chat.entity';
 import { ResumeSpecialization } from './entities/resume-specialization.entity';
 import { ResumeCandidateScore } from './entities/resume-candidate-score.entity';
+import { ResumeLead } from './entities/resume-lead.entity';
+import { ResumeLeadTag } from './entities/resume-lead-tag.entity';
 import { ResumeService } from './resume.service';
 import { ResumeDuplicateDetectionService } from './resume-duplicate-detection.service';
 import { ResumeController } from './resume.controller';
@@ -30,6 +32,8 @@ import { ResumePublicController } from './resume-public.controller';
       ResumeTelegramChat,
       ResumeSpecialization,
       ResumeCandidateScore,
+      ResumeLead,
+      ResumeLeadTag,
     ]),
     MulterModule.register({ storage: multer.memoryStorage() }),
   ],

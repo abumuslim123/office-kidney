@@ -44,6 +44,10 @@ interface CandidateGroup {
   items: ResumeCandidate[];
 }
 
+function allSpecsText(c: ResumeCandidate): string {
+  return [c.specialization, ...(c.additionalSpecializations || [])].filter(Boolean).join(', ') || '—';
+}
+
 function groupCandidates(candidates: ResumeCandidate[], groupBy: GroupBy): CandidateGroup[] {
   if (groupBy === 'none') return [{ key: '', label: '', items: candidates }];
 
@@ -51,9 +55,14 @@ function groupCandidates(candidates: ResumeCandidate[], groupBy: GroupBy): Candi
   for (const c of candidates) {
     let keys: string[];
     switch (groupBy) {
-      case 'specialization':
-        keys = [c.specialization || 'Без специализации'];
+      case 'specialization': {
+        const allSpecs = [
+          c.specialization,
+          ...(c.additionalSpecializations || []),
+        ].filter(Boolean) as string[];
+        keys = allSpecs.length > 0 ? allSpecs : ['Без специализации'];
         break;
+      }
       case 'branch':
         keys = c.branches.length > 0 ? c.branches : ['Без филиала'];
         break;
@@ -219,6 +228,7 @@ function TagsCell({
   onAddTag,
   onRemoveTag,
   onRetry,
+  allTags,
 }: {
   c: ResumeCandidate;
   tagDropdownId: string | null;
@@ -227,7 +237,25 @@ function TagsCell({
   onAddTag: (candidateId: string, label: string, color: string) => void;
   onRemoveTag: (tagId: string) => void;
   onRetry: (id: string) => void;
+  allTags: { label: string; color: string | null }[];
 }) {
+  const [customLabel, setCustomLabel] = useState('');
+  const [customColor, setCustomColor] = useState('#3b82f6');
+
+  const existingLabels = new Set((c.tags || []).map((t) => t.label));
+
+  // Объединяем предзаданные + глобальные теги, убираем дубликаты
+  const mergedTags = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of PREDEFINED_TAGS) map.set(p.label, p.color);
+    for (const t of allTags) {
+      if (!map.has(t.label)) map.set(t.label, t.color || '#6b7280');
+    }
+    return Array.from(map.entries()).map(([label, color]) => ({ label, color }));
+  }, [allTags]);
+
+  const availableTags = mergedTags.filter((t) => !existingLabels.has(t.label));
+
   return (
     <div className="flex flex-wrap items-center gap-1">
       {['PENDING', 'EXTRACTING', 'PARSING'].includes(c.processingStatus) && (
@@ -272,23 +300,54 @@ function TagsCell({
           </svg>
         </button>
         {tagDropdownId === c.id && (
-          <div className="absolute z-30 top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-1.5 min-w-[150px]">
-            {PREDEFINED_TAGS.filter((p) => !(c.tags || []).some((t) => t.label === p.label)).map(
-              (p) => (
-                <button
-                  key={p.label}
-                  type="button"
-                  onClick={() => onAddTag(c.id, p.label, p.color)}
-                  className="block w-full text-left px-2 py-1 text-xs rounded hover:bg-gray-50 transition-colors"
-                >
-                  <span
-                    className="inline-block w-2 h-2 rounded-full mr-1.5"
-                    style={{ backgroundColor: p.color }}
-                  />
-                  {p.label}
-                </button>
-              ),
-            )}
+          <div className="absolute z-30 top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-1.5 min-w-[180px] max-h-[280px] overflow-y-auto">
+            {availableTags.map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => onAddTag(c.id, p.label, p.color)}
+                className="block w-full text-left px-2 py-1 text-xs rounded hover:bg-gray-50 transition-colors"
+              >
+                <span
+                  className="inline-block w-2 h-2 rounded-full mr-1.5"
+                  style={{ backgroundColor: p.color }}
+                />
+                {p.label}
+              </button>
+            ))}
+            {availableTags.length > 0 && <hr className="my-1 border-gray-100" />}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (customLabel.trim() && !existingLabels.has(customLabel.trim())) {
+                  onAddTag(c.id, customLabel.trim(), customColor);
+                  setCustomLabel('');
+                }
+              }}
+              className="flex items-center gap-1 px-1 pt-1"
+            >
+              <input
+                type="text"
+                value={customLabel}
+                onChange={(e) => setCustomLabel(e.target.value)}
+                placeholder="Новый тег..."
+                maxLength={100}
+                className="flex-1 min-w-0 border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:ring-1 focus:ring-accent/30 focus:border-accent"
+              />
+              <input
+                type="color"
+                value={customColor}
+                onChange={(e) => setCustomColor(e.target.value)}
+                className="w-5 h-5 rounded border border-gray-200 cursor-pointer flex-shrink-0"
+              />
+              <button
+                type="submit"
+                disabled={!customLabel.trim()}
+                className="px-1.5 py-0.5 text-xs font-medium rounded bg-accent text-white hover:bg-accent-hover disabled:opacity-50 flex-shrink-0"
+              >
+                +
+              </button>
+            </form>
           </div>
         )}
       </div>
@@ -459,6 +518,7 @@ function SidePanel({
   onRemoveTag,
   onRetry,
   silentReload,
+  allTags,
 }: {
   candidate: ResumeCandidate;
   onClose: () => void;
@@ -472,6 +532,7 @@ function SidePanel({
   onRemoveTag: (tagId: string) => void;
   onRetry: (id: string) => void;
   silentReload: () => void;
+  allTags: { label: string; color: string | null }[];
 }) {
   const c = candidate;
 
@@ -487,7 +548,7 @@ function SidePanel({
             >
               {c.fullName || '—'}
             </Link>
-            <div className="text-sm text-gray-500 mt-0.5">{c.specialization || '—'}</div>
+            <div className="text-sm text-gray-500 mt-0.5">{allSpecsText(c)}</div>
             <div className="text-xs text-gray-400 mt-0.5">{formatDateTime(c.createdAt)}</div>
           </div>
           <button
@@ -570,6 +631,7 @@ function SidePanel({
             onAddTag={onAddTag}
             onRemoveTag={onRemoveTag}
             onRetry={onRetry}
+            allTags={allTags}
           />
         </div>
 
@@ -605,15 +667,33 @@ function SidePanel({
 //  MAIN COMPONENT
 // ═════════════════════════════════════════════════════════════════════════════
 
+// Восстановление поиска из sessionStorage
+function getStoredSearch(): { search: string; semanticMode: boolean } {
+  try {
+    const raw = sessionStorage.getItem('resumeSearch');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return { search: parsed.search || '', semanticMode: !!parsed.semanticMode };
+    }
+  } catch { /* ignore */ }
+  return { search: '', semanticMode: false };
+}
+
 export default function ResumeCandidatesPage() {
+  const storedSearch = useRef(getStoredSearch());
   const [candidates, setCandidates] = useState<ResumeCandidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [limit, setLimit] = useState(25);
-  const [filters, setFilters] = useState<ResumeFilters>(emptyFilters);
+  const [filters, setFilters] = useState<ResumeFilters>(() => ({
+    ...emptyFilters,
+    search: storedSearch.current.search,
+  }));
   const [exporting, setExporting] = useState(false);
   const [deduplicating, setDeduplicating] = useState(false);
+  const [generatingEmbeddings, setGeneratingEmbeddings] = useState(false);
+  const [embeddingsStatus, setEmbeddingsStatus] = useState<{ total: number; ready: number; pending: number } | null>(null);
   const [sortBy, setSortBy] = useState('createdAt');
   const [sortOrder, setSortOrder] = useState<'ASC' | 'DESC'>('DESC');
   const [tagDropdownId, setTagDropdownId] = useState<string | null>(null);
@@ -621,6 +701,11 @@ export default function ResumeCandidatesPage() {
   const [viewMode, setViewMode] = useState<ViewMode>(getStoredViewMode);
   const [groupBy, setGroupBy] = useState<GroupBy>('none');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [semanticMode, setSemanticMode] = useState(storedSearch.current.semanticMode);
+  const [semanticResults, setSemanticResults] = useState<(ResumeCandidate & { similarity?: number; matchScore?: number; constraintScore?: number; relevanceLevel?: 'high' | 'medium' | 'low'; snippet?: string })[] | null>(null);
+  const [semanticLoading, setSemanticLoading] = useState(false);
+  const [semanticExplanation, setSemanticExplanation] = useState<string | null>(null);
+  const [allTags, setAllTags] = useState<{ label: string; color: string | null }[]>([]);
   const tagDropdownRef = useRef<HTMLDivElement>(null);
   const contactPopupRef = useRef<HTMLDivElement>(null);
 
@@ -672,6 +757,13 @@ export default function ResumeCandidatesPage() {
     }
   }, [buildParams]);
 
+  const loadAllTags = useCallback(async () => {
+    try {
+      const res = await api.get<{ label: string; color: string | null }[]>('/resume/tags/all');
+      setAllTags(res.data);
+    } catch { /* ignore */ }
+  }, []);
+
   const silentReload = useCallback(async () => {
     try {
       const res = await api.get<{ data: ResumeCandidate[]; total: number }>('/resume/candidates', {
@@ -684,9 +776,55 @@ export default function ResumeCandidatesPage() {
     }
   }, [buildParams]);
 
+  // Сохраняем поиск в sessionStorage для восстановления при возврате из карточки
   useEffect(() => {
-    load();
-  }, [load]);
+    sessionStorage.setItem('resumeSearch', JSON.stringify({
+      search: filters.search,
+      semanticMode,
+    }));
+  }, [filters.search, semanticMode]);
+
+  useEffect(() => { loadAllTags(); }, [loadAllTags]);
+
+  useEffect(() => {
+    if (!semanticMode) {
+      setSemanticResults(null);
+      load();
+    }
+  }, [load, semanticMode]);
+
+  // Семантический поиск (debounced через filters.search)
+  useEffect(() => {
+    if (!semanticMode || !filters.search.trim()) {
+      if (semanticMode) setSemanticResults(null);
+      return;
+    }
+    setSemanticLoading(true);
+    const params: Record<string, string> = { q: filters.search, limit: '10' };
+    if (filters.specialization) params.specialization = filters.specialization;
+    if (filters.branch) params.branch = filters.branch;
+    if (filters.status) params.status = filters.status;
+    if (filters.priority) params.priority = filters.priority;
+    if (filters.doctorType) params.doctorType = filters.doctorType;
+    if (filters.category) params.qualificationCategory = filters.category;
+    if (filters.city) params.city = filters.city;
+    if (filters.workCity) params.workCity = filters.workCity;
+    if (filters.educationCity) params.educationCity = filters.educationCity;
+    if (filters.experience) {
+      const [min, max] = filters.experience.split('-');
+      if (min) params.experienceMin = min;
+      if (max) params.experienceMax = max;
+    }
+    if (filters.accreditation) params.accreditation = filters.accreditation;
+    if (filters.scoreMin) params.scoreMin = filters.scoreMin;
+    api.get('/resume/candidates/search/semantic', { params })
+      .then(res => {
+        setSemanticResults(res.data.data);
+        setSemanticExplanation(res.data.queryAnalysis?.explanation || null);
+      })
+      .catch(() => { setSemanticResults([]); setSemanticExplanation(null); })
+      .finally(() => setSemanticLoading(false));
+  }, [semanticMode, filters]);
 
   // Автовыбор первого кандидата в split-режиме
   useEffect(() => {
@@ -755,6 +893,35 @@ export default function ResumeCandidatesPage() {
     }
   };
 
+  const loadEmbeddingsStatus = useCallback(async () => {
+    try {
+      const res = await api.get<{ total: number; ready: number; pending: number }>('/resume/embeddings/status');
+      setEmbeddingsStatus(res.data);
+      return res.data;
+    } catch { return null; }
+  }, []);
+
+  // Загрузка статуса при монтировании
+  useEffect(() => { loadEmbeddingsStatus(); }, [loadEmbeddingsStatus]);
+
+  const handleGenerateEmbeddings = async () => {
+    setGeneratingEmbeddings(true);
+    try {
+      await api.post('/resume/embeddings/generate');
+      // Поллим статус каждые 3 сек пока pending > 0
+      const poll = setInterval(async () => {
+        const status = await loadEmbeddingsStatus();
+        if (!status || status.pending === 0) {
+          clearInterval(poll);
+          setGeneratingEmbeddings(false);
+        }
+      }, 3000);
+    } catch {
+      alert('Ошибка при генерации эмбеддингов');
+      setGeneratingEmbeddings(false);
+    }
+  };
+
   const updateField = async (id: string, field: string, value: string) => {
     try {
       await api.patch(`/resume/candidates/${id}`, { [field]: value });
@@ -778,6 +945,7 @@ export default function ResumeCandidatesPage() {
       await api.post(`/resume/candidates/${candidateId}/tags`, { label, color });
       setTagDropdownId(null);
       silentReload();
+      loadAllTags();
     } catch {
       /* ignore */
     }
@@ -825,14 +993,18 @@ export default function ResumeCandidatesPage() {
 
   const totalPages = Math.ceil(total / limit);
 
+  // В семантическом режиме используем результаты поиска
+  const displayCandidates = semanticMode ? (semanticResults || []) : candidates;
+  const isLoading = semanticMode ? semanticLoading : loading;
+
   // Grouping
   const groups = useMemo(() => {
-    const grouped = groupCandidates(candidates, groupBy);
+    const grouped = groupCandidates(displayCandidates, groupBy);
     if (groupBy !== 'none') {
       return sortWithinGroups(grouped, sortBy, sortOrder);
     }
     return grouped;
-  }, [candidates, groupBy, sortBy, sortOrder]);
+  }, [displayCandidates, groupBy, sortBy, sortOrder]);
 
   // Selected candidate for split view
   const selectedCandidate = useMemo(
@@ -942,7 +1114,7 @@ export default function ResumeCandidatesPage() {
           />
         </div>
       </td>
-      <td className="px-3 py-2 text-gray-600">{c.specialization || '—'}</td>
+      <td className="px-3 py-2 text-gray-600">{allSpecsText(c)}</td>
       <td className="px-3 py-2">
         <ResumeDoctorTypesCell candidateId={c.id} doctorTypes={c.doctorTypes || []} onUpdated={silentReload} />
       </td>
@@ -956,13 +1128,32 @@ export default function ResumeCandidatesPage() {
         <StatusSelect candidate={c} onUpdate={updateField} />
       </td>
       <td className="px-3 py-2">
-        {c.aiScore != null ? (
-          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${getScoreColor(c.aiScore)}`}>
-            {Math.round(c.aiScore)}
-          </span>
-        ) : (
-          <span className="text-xs text-gray-300">—</span>
-        )}
+        <div className="flex items-center gap-1.5">
+          {c.aiScore != null ? (
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${getScoreColor(c.aiScore)}`}>
+              {Math.round(c.aiScore)}
+            </span>
+          ) : (
+            <span className="text-xs text-gray-300">—</span>
+          )}
+          {semanticMode && 'matchScore' in c && (c as ResumeCandidate & { matchScore?: number; relevanceLevel?: string }).matchScore != null && (() => {
+            const s = c as ResumeCandidate & { matchScore: number; relevanceLevel?: string };
+            const rl = s.relevanceLevel || 'low';
+            const rlColors = { high: 'bg-emerald-100 text-emerald-700', medium: 'bg-amber-100 text-amber-700', low: 'bg-gray-100 text-gray-500' };
+            return (
+              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${rlColors[rl as keyof typeof rlColors] || rlColors.low}`}>
+                {s.matchScore}%
+              </span>
+            );
+          })()}
+        </div>
+      </td>
+      <td className="px-3 py-2 text-sm text-gray-600 whitespace-nowrap">
+        {c.desiredSalary != null && c.desiredSalaryType
+          ? c.desiredSalaryType === 'PERCENT_OF_VISIT'
+            ? `${c.desiredSalary}%`
+            : `${Number(c.desiredSalary).toLocaleString('ru-RU')} \u20BD`
+          : <span className="text-gray-300">&mdash;</span>}
       </td>
       <td className="px-3 py-2">
         <TagsCell
@@ -973,6 +1164,7 @@ export default function ResumeCandidatesPage() {
           onAddTag={handleAddTag}
           onRemoveTag={handleRemoveTag}
           onRetry={handleRetry}
+          allTags={allTags}
         />
       </td>
       <td className="px-3 py-2">
@@ -999,7 +1191,7 @@ export default function ResumeCandidatesPage() {
             </span>
           )}
         </div>
-        <div className="text-xs text-gray-500">{c.specialization || '—'}</div>
+        <div className="text-xs text-gray-500">{allSpecsText(c)}</div>
       </td>
       {/* Этап (цветной бейдж) */}
       <td className="px-3 py-1.5">
@@ -1026,9 +1218,13 @@ export default function ResumeCandidatesPage() {
       NEW: 'border-l-gray-400',
       REVIEWING: 'border-l-blue-500',
       INVITED: 'border-l-purple-500',
+      ONLINE_INTERVIEW: 'border-l-violet-500',
+      INTERVIEW: 'border-l-indigo-500',
+      TRIAL: 'border-l-amber-500',
+      INTERNSHIP: 'border-l-cyan-500',
       HIRED: 'border-l-emerald-500',
-      RESERVE: 'border-l-yellow-500',
       REJECTED: 'border-l-red-500',
+      RESERVE: 'border-l-yellow-500',
     };
 
     return (
@@ -1057,7 +1253,7 @@ export default function ResumeCandidatesPage() {
 
         {/* Row 2: Specialization + Branch + Score */}
         <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
-          <span className="text-xs text-gray-600">{c.specialization || '—'}</span>
+          <span className="text-xs text-gray-600">{allSpecsText(c)}</span>
           {c.aiScore != null && (
             <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold ${getScoreColor(c.aiScore)}`}>
               {Math.round(c.aiScore)}
@@ -1092,6 +1288,7 @@ export default function ResumeCandidatesPage() {
           onAddTag={handleAddTag}
           onRemoveTag={handleRemoveTag}
           onRetry={handleRetry}
+          allTags={allTags}
         />
       </div>
     );
@@ -1166,17 +1363,74 @@ export default function ResumeCandidatesPage() {
         onChange={handleFiltersChange}
         onExport={handleExport}
         onDeduplicate={handleDeduplicate}
+        onGenerateEmbeddings={handleGenerateEmbeddings}
+        embeddingsStatus={embeddingsStatus}
         exporting={exporting}
         deduplicating={deduplicating}
+        generatingEmbeddings={generatingEmbeddings}
+        semanticMode={semanticMode}
+        onSemanticToggle={() => setSemanticMode(v => !v)}
       />
 
       {/* Content */}
-      {loading ? (
+      {isLoading ? (
         <p className="text-sm text-gray-400">Загрузка...</p>
-      ) : candidates.length === 0 ? (
+      ) : semanticMode && !filters.search.trim() ? (
+        <p className="text-sm text-gray-400">Введите запрос для семантического поиска</p>
+      ) : displayCandidates.length === 0 ? (
         <p className="text-sm text-gray-400">Кандидаты не найдены</p>
       ) : (
         <>
+          {/* ─── SEMANTIC RESULTS VIEW ─────────────────────────────────── */}
+          {semanticMode && semanticResults && semanticResults.length > 0 ? (
+            <div className="space-y-3">
+              {semanticExplanation && (
+                <div className="text-sm text-gray-500 italic px-1">
+                  AI интерпретация: {semanticExplanation}
+                </div>
+              )}
+              {semanticResults.map((c) => {
+                const score = c.matchScore ?? 0;
+                const scoreColor = score >= 75
+                  ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                  : score >= 45
+                    ? 'bg-amber-100 text-amber-700 border-amber-200'
+                    : 'bg-gray-100 text-gray-500 border-gray-200';
+                return (
+                  <Link
+                    key={c.id}
+                    to={`/hr/resume/candidates/${c.id}`}
+                    className="block bg-white border border-gray-200 rounded-xl hover:border-gray-300 hover:shadow-sm transition-all"
+                  >
+                    <div className="flex items-start gap-4 p-4">
+                      {/* Оценка */}
+                      <div className={`flex-shrink-0 w-14 h-14 rounded-xl border flex flex-col items-center justify-center ${scoreColor}`}>
+                        <span className="text-lg font-bold leading-none">{score}</span>
+                        <span className="text-[10px] font-medium leading-none mt-0.5">%</span>
+                      </div>
+                      {/* Информация */}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline gap-2 flex-wrap">
+                          <span className="font-semibold text-gray-900">{c.fullName || '—'}</span>
+                          <span className="text-sm text-gray-500">{c.specialization || ''}</span>
+                        </div>
+                        <div className="text-sm text-gray-500 mt-0.5">
+                          {[c.city, c.totalExperienceYears != null ? `Стаж ${c.totalExperienceYears} лет` : null].filter(Boolean).join(' \u00b7 ')}
+                        </div>
+                        {c.snippet && (
+                          <>
+                            <div className="border-t border-gray-100 my-2" />
+                            <p className="text-sm text-gray-500 leading-relaxed">{c.snippet}</p>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          ) : !semanticMode && (
+          <>
           {/* ─── TABLE VIEW ──────────────────────────────────────────────── */}
           {viewMode === 'table' && (
             <div className="bg-white border border-gray-200 rounded-xl overflow-visible">
@@ -1190,13 +1444,14 @@ export default function ResumeCandidatesPage() {
                     <SortHeader column="qualificationCategory" label="Квалификация" />
                     <SortHeader column="status" label="Этап" />
                     <SortHeader column="aiScore" label="Балл" />
+                    <th className="text-left px-3 py-2 font-medium text-gray-600">ЗП</th>
                     <th className="text-left px-3 py-2 font-medium text-gray-600">Теги</th>
                     <th className="px-3 py-2 w-8" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {groups.map((group) => (
-                    <>{renderTableGroupHeader(group, 9)}{group.items.map((c) => renderTableRow(c))}</>
+                    <>{renderTableGroupHeader(group, 10)}{group.items.map((c) => renderTableRow(c))}</>
                   ))}
                 </tbody>
               </table>
@@ -1252,6 +1507,7 @@ export default function ResumeCandidatesPage() {
                   onRemoveTag={handleRemoveTag}
                   onRetry={handleRetry}
                   silentReload={silentReload}
+                  allTags={allTags}
                 />
               )}
             </div>
@@ -1259,6 +1515,8 @@ export default function ResumeCandidatesPage() {
 
           <Pagination />
         </>
+          )}
+      </>
       )}
     </div>
   );
