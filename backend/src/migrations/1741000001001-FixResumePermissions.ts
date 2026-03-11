@@ -1,7 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddResumePermissions1741000001000 implements MigrationInterface {
+export class FixResumePermissions1741000001001 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
+    // Создать resume-права (без колонки description, которой нет в таблице)
     await queryRunner.query(`
       INSERT INTO permissions (id, slug, name) VALUES
         (gen_random_uuid(), 'hr_resume_view',               'HR Резюме: просмотр'),
