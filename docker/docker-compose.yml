@@ -40,6 +40,7 @@ services:
     volumes:
       - ../backend/apk:/app/apk:ro
       - ../backend/uploads:/app/uploads
+      - ${DB_BACKUP_HOST_DIR:-../backups/postgres}:/backups:ro
     depends_on:
       postgres:
         condition: service_healthy
