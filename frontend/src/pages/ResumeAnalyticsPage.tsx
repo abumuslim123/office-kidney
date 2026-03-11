@@ -218,7 +218,7 @@ export default function ResumeAnalyticsPage() {
                     <Cell key={entry.key} fill={GENDER_PIE_COLORS[entry.key] || '#9ca3af'} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(value: number) => [value, 'Кандидатов']} />
+                <Tooltip formatter={(value) => [value, 'Кандидатов']} />
               </PieChart>
             </ResponsiveContainer>
           </ChartCard>
