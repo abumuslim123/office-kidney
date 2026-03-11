@@ -17,6 +17,7 @@ import {
   ResumeCandidateStatus,
   ResumeProcessingStatus,
   ResumeQualificationCategory,
+  ResumeSalaryType,
 } from './resume.enums';
 import { ResumeUploadedFile } from './resume-uploaded-file.entity';
 import { ResumeWorkHistory } from './resume-work-history.entity';
@@ -208,11 +209,21 @@ export class ResumeCandidate {
   @OneToMany(() => ResumeCandidateTag, (tag) => tag.candidate)
   tags: ResumeCandidateTag[];
 
+  @Column({ type: 'int', nullable: true })
+  desiredSalary: number | null;
+
+  @Column({
+    type: 'enum',
+    enum: ResumeSalaryType,
+    nullable: true,
+  })
+  desiredSalaryType: ResumeSalaryType | null;
+
   @Column({ type: 'float', nullable: true })
   aiScore: number | null;
 
-  @Column({ type: 'varchar', nullable: true, select: false })
-  embedding: string | null;
+  // embedding: vector(1024) — управляется через raw SQL, не TypeORM
+  // TypeORM synchronize не умеет работать с pgvector
 
   @OneToMany(() => ResumeCandidateScore, (score) => score.candidate)
   scores: ResumeCandidateScore[];

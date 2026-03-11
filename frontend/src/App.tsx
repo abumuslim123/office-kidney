@@ -42,6 +42,8 @@ import ResumeCandidateDetailPage from './pages/ResumeCandidateDetailPage';
 import ResumeAnalyticsPage from './pages/ResumeAnalyticsPage';
 import ResumeArchivePage from './pages/ResumeArchivePage';
 import ResumeTrashPage from './pages/ResumeTrashPage';
+
+import ResumeLeadsPage from './pages/ResumeLeadsPage';
 import ResumeApplyPublic from './pages/ResumeApplyPublic';
 import ResumeApplySuccess from './pages/ResumeApplySuccess';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -117,9 +119,11 @@ function App() {
         {resumeEnabled && (
           <Route path="hr/resume" element={<ProtectedRoute permissions={['hr']}><ResumeLayout /></ProtectedRoute>}>
             <Route index element={<ResumeUploadPage />} />
+            <Route path="leads" element={<ResumeLeadsPage />} />
             <Route path="candidates" element={<ResumeCandidatesPage />} />
             <Route path="candidates/:id" element={<ResumeCandidateDetailPage />} />
             <Route path="analytics" element={<ResumeAnalyticsPage />} />
+
             <Route path="archive" element={<ResumeArchivePage />} />
             <Route path="trash" element={<ResumeTrashPage />} />
           </Route>

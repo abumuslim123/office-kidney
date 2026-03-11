@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../lib/api';
-import type { ResumeCandidate } from '../lib/resume-types';
+import type { ResumeCandidate, SimilarCandidate } from '../lib/resume-types';
 import {
   CANDIDATE_STATUSES,
   CANDIDATE_STATUS_COLORS,
@@ -18,6 +18,63 @@ import ResumeDoctorTypesCell from '../components/resume/ResumeDoctorTypesCell';
 import ResumeNotesSection from '../components/resume/ResumeNotesSection';
 import ResumeTagsManager from '../components/resume/ResumeTagsManager';
 import ResumeScoreCard from '../components/resume/ResumeScoreCard';
+import { getScoreColor } from '../lib/resume-constants';
+
+function SimilarCandidatesSection({ candidateId }: { candidateId: string }) {
+  const [similar, setSimilar] = useState<SimilarCandidate[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    api.get<SimilarCandidate[]>(`/resume/candidates/${candidateId}/similar`)
+      .then(res => setSimilar(res.data))
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, [candidateId]);
+
+  if (!loaded || similar.length === 0) return null;
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl p-4">
+      <h3 className="text-sm font-semibold text-gray-900 mb-3">Похожие кандидаты</h3>
+      <div className="space-y-1.5">
+        {similar.map(s => (
+          <Link
+            key={s.id}
+            to={`/hr/resume/candidates/${s.id}`}
+            className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-900 truncate">{s.fullName}</span>
+                {s.specialization && (
+                  <span className="text-xs text-gray-500 truncate">{s.specialization}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 mt-0.5">
+                {s.city && (
+                  <span className="text-xs text-gray-400">{s.city}</span>
+                )}
+                {s.totalExperienceYears != null && (
+                  <span className="text-xs text-gray-400">стаж {s.totalExperienceYears} лет</span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-3 flex-shrink-0">
+              {s.aiScore != null && (
+                <span className={`text-xs px-1.5 py-0.5 rounded ${getScoreColor(s.aiScore)}`}>
+                  {s.aiScore}
+                </span>
+              )}
+              <span className="text-xs font-medium text-indigo-600">
+                {Math.round(s.similarity * 100)}%
+              </span>
+            </div>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function ResumeCandidateDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -54,6 +111,16 @@ export default function ResumeCandidateDetailPage() {
     load();
   }, [load]);
 
+  // Автообновление пока идёт AI-обработка
+  useEffect(() => {
+    if (!candidate) return;
+    const isProcessing = ['PENDING', 'EXTRACTING', 'PARSING'].includes(candidate.processingStatus);
+    if (!isProcessing) return;
+
+    const interval = setInterval(silentLoad, 3000);
+    return () => clearInterval(interval);
+  }, [candidate?.processingStatus, silentLoad]);
+
   const handleSupplement = async () => {
     if (!id || !supplementText.trim()) return;
     setSupplementing(true);
@@ -73,6 +140,16 @@ export default function ResumeCandidateDetailPage() {
     try {
       await api.patch(`/resume/candidates/${id}`, { [field]: value });
       load();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const updateFields = async (data: Record<string, unknown>) => {
+    if (!id) return;
+    try {
+      await api.patch(`/resume/candidates/${id}`, data);
+      silentLoad();
     } catch {
       /* ignore */
     }
@@ -205,6 +282,9 @@ export default function ResumeCandidateDetailPage() {
       {/* AI Score Card */}
       <ResumeScoreCard candidateId={c.id} candidate={c} onFieldUpdated={silentLoad} />
 
+      {/* Similar candidates */}
+      <SimilarCandidatesSection candidateId={c.id} />
+
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Personal Info */}
         <Section title="Личные данные">
@@ -244,9 +324,10 @@ export default function ResumeCandidateDetailPage() {
         {/* Qualification */}
         <Section title="Квалификация">
           <Field label="Специализация" value={c.specialization} />
-          {c.additionalSpecializations.length > 0 && (
-            <Field label="Доп. специализации" value={c.additionalSpecializations.join(', ')} />
-          )}
+          <AdditionalSpecializationsEditor
+            specs={c.additionalSpecializations}
+            onSave={(specs) => updateFields({ additionalSpecializations: specs })}
+          />
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-400">Категория:</span>
             <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${CATEGORY_COLORS[c.qualificationCategory] || ''}`}>
@@ -279,6 +360,7 @@ export default function ResumeCandidateDetailPage() {
         <Section title="Опыт работы">
           <Field label="Общий стаж" value={c.totalExperienceYears != null ? `${c.totalExperienceYears} лет` : null} />
           <Field label="Стаж по специальности" value={c.specialtyExperienceYears != null ? `${c.specialtyExperienceYears} лет` : null} />
+          <SalaryField candidate={c} onSave={updateFields} />
         </Section>
 
         {/* Additional */}
@@ -352,7 +434,7 @@ export default function ResumeCandidateDetailPage() {
 
       {/* Tags */}
       <div className="bg-white border border-gray-200 rounded-xl p-4">
-        <ResumeTagsManager candidateId={c.id} tags={c.tags || []} onUpdated={load} />
+        <ResumeTagsManager candidateId={c.id} tags={c.tags || []} onUpdated={silentLoad} />
       </div>
 
       {/* Supplement resume */}
@@ -425,6 +507,191 @@ export default function ResumeCandidateDetailPage() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function AdditionalSpecializationsEditor({
+  specs,
+  onSave,
+}: {
+  specs: string[];
+  onSave: (specs: string[]) => void;
+}) {
+  const [allSpecs, setAllSpecs] = useState<string[]>([]);
+  const [newSpec, setNewSpec] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  useEffect(() => {
+    api.get<{ specializations: string[] }>('/resume/candidates/filter-options')
+      .then((r) => setAllSpecs(r.data.specializations))
+      .catch(() => {});
+  }, []);
+
+  const filtered = allSpecs.filter(
+    (s) => !specs.includes(s) && (!newSpec || s.toLowerCase().includes(newSpec.toLowerCase())),
+  );
+
+  const addSpec = (s: string) => {
+    const trimmed = s.trim();
+    if (trimmed && !specs.includes(trimmed)) {
+      onSave([...specs, trimmed]);
+    }
+    setNewSpec('');
+    setShowSuggestions(false);
+  };
+
+  const removeSpec = (i: number) => {
+    onSave(specs.filter((_, j) => j !== i));
+  };
+
+  return (
+    <div>
+      <span className="text-xs text-gray-400">Доп. специализации</span>
+      <div className="flex flex-wrap gap-1.5 mt-1 mb-2">
+        {specs.map((s, i) => (
+          <span
+            key={i}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-indigo-100 text-indigo-800"
+          >
+            {s}
+            <button
+              type="button"
+              onClick={() => removeSpec(i)}
+              className="hover:text-red-600"
+            >
+              &times;
+            </button>
+          </span>
+        ))}
+        {specs.length === 0 && <span className="text-xs text-gray-400">—</span>}
+      </div>
+      <div className="relative flex gap-2">
+        <input
+          value={newSpec}
+          onChange={(e) => { setNewSpec(e.target.value); setShowSuggestions(true); }}
+          onFocus={() => setShowSuggestions(true)}
+          onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSpec(newSpec); } }}
+          className="flex-1 border border-gray-300 rounded-lg px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 outline-none"
+          placeholder="Добавить специализацию"
+        />
+        <button
+          type="button"
+          onClick={() => addSpec(newSpec)}
+          className="px-3 py-1 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
+        >
+          +
+        </button>
+        {showSuggestions && newSpec && filtered.length > 0 && (
+          <div className="absolute top-full left-0 right-12 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto z-10">
+            {filtered.slice(0, 10).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => addSpec(s)}
+                className="block w-full text-left px-3 py-1.5 text-sm hover:bg-indigo-50 text-gray-700"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function formatSalary(salary: number | null, type: string | null): string {
+  if (salary == null || !type) return '—';
+  if (type === 'PERCENT_OF_VISIT') return `${salary}%`;
+  return `${salary.toLocaleString('ru-RU')} \u20BD`;
+}
+
+function SalaryField({ candidate, onSave }: { candidate: ResumeCandidate; onSave: (data: Record<string, unknown>) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [amount, setAmount] = useState<string>(candidate.desiredSalary?.toString() || '');
+  const [type, setType] = useState<string>(candidate.desiredSalaryType || 'FIXED_RUB');
+
+  const hasSalary = candidate.desiredSalary != null && candidate.desiredSalaryType != null;
+
+  const handleSave = () => {
+    const num = parseFloat(amount);
+    if (!isNaN(num) && num > 0) {
+      onSave({ desiredSalary: num, desiredSalaryType: type });
+    }
+    setEditing(false);
+  };
+
+  if (hasSalary && !editing) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-gray-400">Желаемая ЗП:</span>
+        <span className="text-sm font-medium text-gray-700">
+          {formatSalary(candidate.desiredSalary, candidate.desiredSalaryType)}
+        </span>
+        <button
+          type="button"
+          onClick={() => { setAmount(candidate.desiredSalary?.toString() || ''); setType(candidate.desiredSalaryType || 'FIXED_RUB'); setEditing(true); }}
+          className="text-xs text-accent hover:underline"
+        >
+          Изменить
+        </button>
+      </div>
+    );
+  }
+
+  if (!hasSalary && !editing) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-gray-400">Желаемая ЗП:</span>
+        <span className="text-sm text-gray-400">—</span>
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="text-xs text-accent hover:underline"
+        >
+          Указать
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <span className="text-xs text-gray-400 block mb-1">Желаемая ЗП</span>
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          value={amount}
+          onChange={e => setAmount(e.target.value)}
+          placeholder={type === 'PERCENT_OF_VISIT' ? '30' : '80000'}
+          className="w-28 border border-gray-300 rounded-lg px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 outline-none"
+        />
+        <select
+          value={type}
+          onChange={e => setType(e.target.value)}
+          className="border border-gray-300 rounded-lg px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 outline-none"
+        >
+          <option value="FIXED_RUB">{'\u20BD'} Фиксированная</option>
+          <option value="PERCENT_OF_VISIT">% от приёма</option>
+        </select>
+        <button
+          type="button"
+          onClick={handleSave}
+          className="px-2 py-1 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+        >
+          Сохранить
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditing(false)}
+          className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700"
+        >
+          Отмена
+        </button>
+      </div>
     </div>
   );
 }

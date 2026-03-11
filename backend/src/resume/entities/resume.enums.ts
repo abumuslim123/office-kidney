@@ -17,9 +17,13 @@ export enum ResumeCandidateStatus {
   NEW = 'NEW',
   REVIEWING = 'REVIEWING',
   INVITED = 'INVITED',
+  ONLINE_INTERVIEW = 'ONLINE_INTERVIEW',
+  INTERVIEW = 'INTERVIEW',
+  TRIAL = 'TRIAL',
+  INTERNSHIP = 'INTERNSHIP',
   HIRED = 'HIRED',
-  RESERVE = 'RESERVE',
   REJECTED = 'REJECTED',
+  RESERVE = 'RESERVE',
 }
 
 export enum ResumeCandidatePriority {
@@ -40,4 +44,17 @@ export enum ResumeCandidateDoctorType {
   PEDIATRIC = 'PEDIATRIC',
   THERAPIST = 'THERAPIST',
   FAMILY = 'FAMILY',
+}
+
+export enum ResumeSalaryType {
+  FIXED_RUB = 'FIXED_RUB',
+  PERCENT_OF_VISIT = 'PERCENT_OF_VISIT',
+}
+
+export enum ResumeLeadStatus {
+  NEW = 'NEW',
+  IN_PROGRESS = 'IN_PROGRESS',
+  CONTACTED = 'CONTACTED',
+  CONVERTED = 'CONVERTED',
+  NOT_RELEVANT = 'NOT_RELEVANT',
 }
